@@ -6,6 +6,15 @@ Format: newest first. Each entry has a date, the decision, the reasoning, and st
 
 ---
 
+## 2026-07-22 - v0.1 scaffold choices
+
+v0.1 implementation has started after Phase 0 manual proof passed. The first slice creates the locked monorepo shape and shared Rust crate boundaries without implementing future-phase features.
+
+- **License: MIT.** Reasoning: the product plan requires MIT or Apache-2.0; MIT is short, permissive, and compatible with keeping upstream GPL tools as separate invoked processes rather than linked libraries. *Status: accepted.*
+- **Workspace members start with `sw-core`, `sw-agent`, and `sw-launcher`.** Reasoning: this gives shared protocol/config types, a node daemon boundary, and the planned host launch-helper boundary while keeping v0.1 focused on screen/pairing/auto-connect. *Status: accepted.*
+- **Companion folder is scaffolded, not a full Tauri app yet.** Reasoning: the companion must eventually be Tauri, but adding full Tauri dependencies before the shared API settles would create churn. The folder documents the boundary while the first slice focuses on buildable Rust core crates. *Status: accepted for first v0.1 slice.*
+- **No hardcoded hardware/network/display defaults in source.** Reasoning: Phase 0 proved render-device order is machine-dependent; source types accept detected/configured values rather than baking in model names, IPs, paths, codecs, resolutions, or drive letters. *Status: accepted.*
+
 ## 2026-07-21 — Phase 0 documentation choices
 
 Phase 0 is docs-only (a manual proof). No product code was written. The following choices were made while writing `FIRST-SETUP.md`; each is a *manual-proof convenience*, not a product commitment — Phase 1 will re-decide how the image automates them.

@@ -1,0 +1,12 @@
+[Unit]
+Description=SecondWind kiosk session
+After=sw-agent.service
+Requires=sw-agent.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sw-kiosk
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

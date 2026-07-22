@@ -1,0 +1,12 @@
+[Unit]
+Description=SecondWind node agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sw-agent
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

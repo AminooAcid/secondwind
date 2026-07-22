@@ -1,0 +1,17 @@
+/target/
+/target*/
+**/*.rs.bk
+*.pdb
+*.log
+*.tmp
+
+# Local editor/OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Generated secrets/certificates must never be committed.
+*.pem
+*.key
+*.crt
+*.p12
