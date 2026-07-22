@@ -495,42 +495,60 @@ pub fn restart_service_and_wait(credentials: &ApolloCredentials) -> Result<(), A
         std::thread::sleep(Duration::from_millis(500));
     }
 
-    wait_for_api_ready_at(&api_base(), credentials)
+    // After a fresh start the service reads our credentials from disk, so
+    // Ready is expected; anything else means it genuinely failed to come up.
+    match wait_for_api_ready_at(&api_base(), credentials) {
+        ApiReadiness::Ready => Ok(()),
+        _ => Err(ApolloError::ServiceUnavailable),
+    }
 }
 
 /// Polls the dashboard API until an authenticated request succeeds (the
 /// service has finished coming up and loaded our credentials), or times
 /// out. A timeout means either still-down or stale credentials — the
 /// caller restarts in both cases.
-pub fn wait_for_api_ready(
-    credentials: &ApolloCredentials,
-) -> Result<(), ApolloError> {
+/// Outcome of waiting for the dashboard API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApiReadiness {
+    /// The API answered and accepted our credentials.
+    Ready,
+    /// The API answered but rejected our credentials (401) — the running
+    /// service holds stale credentials and must be restarted.
+    StaleCredentials,
+    /// The API never answered within the timeout.
+    Down,
+}
+
+pub fn wait_for_api_ready(credentials: &ApolloCredentials) -> ApiReadiness {
     wait_for_api_ready_at(&api_base(), credentials)
 }
 
-fn wait_for_api_ready_at(
-    api_base: &str,
-    credentials: &ApolloCredentials,
-) -> Result<(), ApolloError> {
-    let agent = localhost_agent()?;
+fn wait_for_api_ready_at(api_base: &str, credentials: &ApolloCredentials) -> ApiReadiness {
+    let Ok(agent) = localhost_agent() else {
+        return ApiReadiness::Down;
+    };
     let authorization = format!(
         "Basic {}",
         base64_encode(format!("{}:{}", credentials.username, credentials.password).as_bytes())
     );
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    // Generous: on an older host Apollo can take a while to bind the API
+    // after the service reports RUNNING.
+    let deadline = std::time::Instant::now() + Duration::from_secs(45);
     let url = format!("{api_base}/api/apps");
 
     loop {
-        // `/api/apps` needs auth: 2xx means our creds are live; a transport
-        // error means the service is still coming up; 401 means it hasn't
-        // reloaded creds yet — keep waiting on both.
+        // 2xx = creds live; 401 = answering but stale creds (restart);
+        // any other error = still coming up, keep waiting.
         match agent.get(&url).set("authorization", &authorization).call() {
-            Ok(_) => return Ok(()),
-            Err(ureq::Error::Status(code, _)) if (200..300).contains(&code) => return Ok(()),
+            Ok(_) => return ApiReadiness::Ready,
+            Err(ureq::Error::Status(code, _)) if (200..300).contains(&code) => {
+                return ApiReadiness::Ready;
+            }
+            Err(ureq::Error::Status(401, _)) => return ApiReadiness::StaleCredentials,
             _ => {}
         }
         if std::time::Instant::now() >= deadline {
-            return Err(ApolloError::ServiceUnavailable);
+            return ApiReadiness::Down;
         }
         std::thread::sleep(Duration::from_millis(500));
     }

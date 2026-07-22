@@ -89,16 +89,25 @@ pub fn connect_screen(
         let (credentials, credentials_created) =
             apollo::load_or_create_credentials(state_root, &installation)
                 .map_err(ScreenControlError::Apollo)?;
-        // Apollo only reads its config + credentials at startup, so restart
-        // it whenever either just changed — otherwise the API rejects our
-        // new credentials with 401 (found on hardware). Otherwise just wait
-        // for the API to answer (a freshly-started service reaches RUNNING
-        // before its HTTPS port is listening); if it never answers with our
-        // credentials, restart to reload them.
+        // Apollo only reads its config + credentials at startup. Restart it
+        // when we just changed either; otherwise wait for the API and only
+        // restart if it's answering with stale credentials (a slow-but-fine
+        // Apollo must NOT trigger a restart — all found on hardware).
         if config_changed || credentials_created {
             apollo::restart_service_and_wait(&credentials).map_err(ScreenControlError::Apollo)?;
-        } else if apollo::wait_for_api_ready(&credentials).is_err() {
-            apollo::restart_service_and_wait(&credentials).map_err(ScreenControlError::Apollo)?;
+        } else {
+            match apollo::wait_for_api_ready(&credentials) {
+                apollo::ApiReadiness::Ready => {}
+                apollo::ApiReadiness::StaleCredentials => {
+                    apollo::restart_service_and_wait(&credentials)
+                        .map_err(ScreenControlError::Apollo)?;
+                }
+                apollo::ApiReadiness::Down => {
+                    return Err(ScreenControlError::Apollo(
+                        apollo::ApolloError::ServiceUnavailable,
+                    ));
+                }
+            }
         }
         let pin = apollo::generate_stream_pair_pin().map_err(ScreenControlError::Apollo)?;
         match apollo::arm_stream_pair_pin(
