@@ -24,6 +24,13 @@ use serde::{Deserialize, Serialize};
 pub const APOLLO_DIR_ENV: &str = "SECONDWIND_APOLLO_DIR";
 pub const APOLLO_SERVICE_ENV: &str = "SECONDWIND_APOLLO_SERVICE";
 pub const APOLLO_API_ENV: &str = "SECONDWIND_APOLLO_API";
+/// Forces Apollo's host encoder (e.g. `software`, `quicksync`, `nvenc`).
+/// Left unset, Apollo auto-detects; set it when the default probe is
+/// unreliable — a flaky/absent NVENC (Optimus laptops) hangs Apollo's
+/// startup encoder probe *before* its web UI binds, so the dashboard
+/// never comes up (root-caused on hardware; Apollo main.cpp runs
+/// probe_encoders() before confighttp::start()).
+pub const APOLLO_ENCODER_ENV: &str = "SECONDWIND_APOLLO_ENCODER";
 
 /// Upstream defaults, used only as detection fallbacks. `sc.exe` matches
 /// the *service name*, not the display name — the real Apollo installs as
@@ -31,7 +38,9 @@ pub const APOLLO_API_ENV: &str = "SECONDWIND_APOLLO_API";
 const DEFAULT_SERVICE_NAMES: [&str; 3] = ["ApolloService", "SunshineService", "Apollo Service"];
 const DEFAULT_EXECUTABLE_NAMES: [&str; 2] = ["sunshine.exe", "apollo.exe"];
 const DEFAULT_CONFIG_RELATIVE: &str = "config/sunshine.conf";
-const DEFAULT_API_BASE: &str = "https://localhost:47990";
+// Explicit IPv4: "localhost" resolves to ::1 first on Windows, but Apollo
+// with `address_family = ipv4` binds only 127.0.0.1 (Sunshine #2793).
+const DEFAULT_API_BASE: &str = "https://127.0.0.1:47990";
 
 const MANAGED_BLOCK_BEGIN: &str = "# --- SecondWind managed (do not edit between markers) ---";
 const MANAGED_BLOCK_END: &str = "# --- end SecondWind managed ---";
@@ -98,7 +107,7 @@ pub const APOLLO_BASE_PORT: u16 = 47989;
 pub const APOLLO_API_PORT: u16 = APOLLO_BASE_PORT + 1;
 
 pub fn managed_config_entries(host_display_name: &str) -> Vec<(String, String)> {
-    vec![
+    let mut entries = vec![
         // The name Moonlight clients see; branded so the node kiosk logs
         // stay in SecondWind terms.
         (
@@ -109,7 +118,20 @@ pub fn managed_config_entries(host_display_name: &str) -> Vec<(String, String)> 
         ("upnp".to_string(), "off".to_string()),
         // Pin the port so the dashboard API stays on 47990.
         ("port".to_string(), APOLLO_BASE_PORT.to_string()),
-    ]
+        // Bind IPv4 only so the companion's 127.0.0.1 requests reach the
+        // dashboard (Apollo otherwise binds ::1 and rejects 127.0.0.1 —
+        // Sunshine #2793 on Win 11 24H2).
+        ("address_family".to_string(), "ipv4".to_string()),
+    ];
+    // Optional host-encoder override: set on machines whose default
+    // (NVENC) probe is unreliable and hangs Apollo before its web UI.
+    if let Ok(encoder) = std::env::var(APOLLO_ENCODER_ENV) {
+        let encoder = encoder.trim().to_string();
+        if !encoder.is_empty() {
+            entries.push(("encoder".to_string(), encoder));
+        }
+    }
+    entries
 }
 
 /// Merges the managed entries into an existing config, replacing a previous
