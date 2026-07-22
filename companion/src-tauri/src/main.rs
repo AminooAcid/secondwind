@@ -6,7 +6,10 @@ fn main() {
     }
     // Headless validation/support: --discover / --pair / --node-health.
     if args.iter().any(|arg| {
-        arg == "--discover" || arg == "--pair" || arg == "--node-health"
+        matches!(
+            arg.as_str(),
+            "--discover" | "--pair" | "--node-health" | "--screen-on" | "--screen-off"
+        )
     }) {
         std::process::exit(secondwind_companion::dev_cli::run(&args[1..]));
     }

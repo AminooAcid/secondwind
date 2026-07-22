@@ -6,6 +6,9 @@
 //!       pair with a discovered node exactly like the UI would
 //!   secondwind-companion --node-health <node-uuid>
 //!       fetch /v1/health from a paired node over mTLS
+//!   secondwind-companion --screen-on <node-uuid>   (needs admin: writes Apollo config)
+//!   secondwind-companion --screen-off <node-uuid>
+//!       drive the Screen feature exactly like the UI toggle
 //!
 //! Used during hardware validation and support sessions; the product flow
 //! remains the UI.
@@ -27,7 +30,10 @@ pub fn run(args: &[String]) -> i32 {
         Some("--discover") => discover(),
         Some("--pair") => pair(args.get(1), args.get(2)),
         Some("--node-health") => node_health(args.get(1)),
-        _ => Err("usage: --discover | --pair <node-uuid> <pin> | --node-health <node-uuid>"
+        Some("--screen-on") => screen(args.get(1), true),
+        Some("--screen-off") => screen(args.get(1), false),
+        _ => Err("usage: --discover | --pair <uuid> <pin> | --node-health <uuid> | \
+                  --screen-on <uuid> | --screen-off <uuid>"
             .to_string()),
     };
 
@@ -110,6 +116,31 @@ fn pair(uuid_arg: Option<&String>, pin_arg: Option<&String>) -> Result<String, S
     }
 
     Ok(format!("paired with {} ({})", node.node_name, node.node_uuid))
+}
+
+fn screen(uuid_arg: Option<&String>, on: bool) -> Result<String, String> {
+    let uuid_text = uuid_arg.ok_or("usage: --screen-on|--screen-off <node-uuid>")?;
+    let node = find(browse()?, uuid_text)?;
+    let state_root = crate::jobs_cli::state_dir()?;
+    let mut state = HostState::load_or_create(&state_root).map_err(|error| error.to_string())?;
+    let endpoint = crate::screen_control::paired_endpoint(
+        &state,
+        &node.node_uuid,
+        node.addresses.clone(),
+        node.api_port,
+    )
+    .map_err(|error| error.to_string())?;
+
+    if on {
+        let response =
+            crate::screen_control::connect_screen(&mut state, &state_root, &node.node_uuid, &endpoint)
+                .map_err(|error| error.to_string())?;
+        Ok(format!("screen on: {:?}", response.screen))
+    } else {
+        let response = crate::screen_control::disconnect_screen(&state, &endpoint)
+            .map_err(|error| error.to_string())?;
+        Ok(format!("screen off: {:?}", response.screen))
+    }
 }
 
 fn node_health(uuid_arg: Option<&String>) -> Result<String, String> {
