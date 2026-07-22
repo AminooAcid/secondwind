@@ -5,6 +5,28 @@ why it waits and what unblocks it. The plan's rule stands: build in phase
 order, small steps, working state — and right now the gate is the first
 hardware validation (`docs/HARDWARE-VALIDATION.md`).
 
+## Apollo control layer — gentler, less destabilising (from first hardware run)
+
+The screen-connect path drove Apollo 0.4.7-alpha into a wedged state on the
+first host. The companion is now hardened against Apollo's startup timing
+(service name, slow stop, API-bind lag, credential-reload restart), but the
+approach is still heavy. Before the next streaming attempt:
+
+- **Do not spawn a second `sunshine.exe` against a live service.** Setting
+  credentials via `sunshine.exe --creds` while `ApolloService` runs means
+  two sunshine processes touching shared state. Prefer setting creds while
+  the service is stopped, or via Apollo's API if it exposes one.
+- **Avoid restarts on the hot path.** Configure Apollo once at
+  install/first-pair (elevated installer), so `connect_screen` only arms a
+  PIN against an already-configured, already-running service — no restart,
+  no config write, at screen-on time.
+- **Detect and clear a stuck stream session** (Apollo kept trying to encode
+  for a client that was gone) instead of restarting blindly.
+- Consider requiring the companion to run elevated for the Screen feature,
+  or a small elevated helper, rather than assuming Program Files is
+  writable.
+- Re-test the full streamed screen after a host reboot with a clean Apollo.
+
 ## Idle-RAM reduction (from first hardware run)
 
 The MSI Haswell node idles at ~530 MB (Screen-only) to ~640 MB (all

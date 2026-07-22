@@ -27,8 +27,30 @@ steps A–B), then `scripts/node/install-node.sh` run per
 - [x] Companion discovers the node; PIN pairs; kiosk flips to the idle screen. ✅ (mDNS over real network; kiosk showed paired-idle ambient screen)
 - [x] mTLS enforced after pairing; a no-client-cert connection is rejected. ✅
 - [x] H.264 hardware decode detected (HD 4600). ✅ (`screen: ok` in `/v1/health`)
-- [ ] Apollo layer: managed config block accepted by the installed Apollo version; credentials + PIN arming work against its localhost API. **Apollo present (0.x, `ApolloService`); service-name bug fixed. Config/PIN arming not yet driven.**
-- [ ] Screen toggle: virtual display appears matching the node panel; windows reflow on disconnect. **Not yet driven — needs Apollo running + release companion + eyes on host monitors.**
+- [~] Apollo layer: managed config block accepted by the installed Apollo version; credentials + PIN arming work against its localhost API. **Validated up to the API: managed config merged (foreign keys preserved), credentials created via `sunshine.exe --creds`, service control works. Then hit Apollo-side instability (see below).**
+- [ ] Screen toggle: virtual display appears matching the node panel; windows reflow on disconnect. **Blocked by the Apollo instability below, not by SecondWind code.**
+
+### Apollo 0.4.7-alpha instability (host-side, 2026-07-22)
+
+Driving `--screen-on` repeatedly, the companion correctly: detected Apollo
+(`ApolloService`), merged its managed config, created SecondWind
+credentials, and controlled the service. The **PIN-arming API call** then
+surfaced a cascade of Apollo-startup timing issues that the companion was
+hardened against (each committed):
+
+- `sc.exe` matches the service *name* `ApolloService`, not the display name.
+- Apollo takes ~30 s to stop (STOP_PENDING) — restart must wait for STOPPED.
+- Apollo reaches RUNNING before its HTTPS API binds — must wait for the API.
+- New credentials 401 until the service restarts (config/creds read at boot).
+- Only restart on a confirmed 401, never on a slow-but-healthy API.
+
+After the churn, Apollo wedged: web UI stopped binding 47990 **even after a
+full clean restart and after removing all SecondWind config/creds** — the
+log shows repeated NVENC encoder attempts and `NV_ENC_ERR_DEVICE_NOT_EXIST`,
+i.e. a stuck GPU/encoder/session state in the alpha build, independent of
+SecondWind. **Resolution: a host reboot clears it (Apollo bound 47990 fine
+at session start).** Retry the streaming leg after a reboot, with the
+gentler Apollo handling noted in the backlog.
 - [ ] Moonlight CLI flags match the shipped client (Flatpak Moonlight 6.1 via the `moonlight` wrapper — verify `pair`/`stream` args).
 - [ ] Auto-connect across cable replug and across the USB-hub Ethernet adapter disappearing.
 - [~] Node idle RAM under ~400 MB. **Currently ~530 (screen-only) to ~640 MB (all services). Debian 13 session stack + always-on xpra; Docker now socket-activated, bloat masked. Reaching target needs lazy-start xpra + session-daemon trim (backlog).**
