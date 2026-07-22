@@ -6,6 +6,13 @@ Format: newest first. Each entry has a date, the decision, the reasoning, and st
 
 ---
 
+## 2026-07-22 — audit-response choices (monitoring agent findings)
+
+The parallel read-only monitoring agent's `BUG_TRACKER.md` findings BUG-010…017 were triaged; all but one were fixed the same day (job-history eviction, component-based path containment, password-file handoff to the elevated share setup, exact bus-id USB detach matching, disk export rollback, restricted session-pass file, in-process kiosk clock).
+
+- **BUG-013 (Apollo credentials on argv) is accepted for now, not fixed.** Upstream's CLI only takes `--creds <user> <pass>` — there is no stdin/env/config alternative to set dashboard credentials non-interactively. Exposure is a sub-second, one-time, first-setup window on the local machine, and the credentials guard only Apollo's localhost dashboard (which SecondWind owns anyway). Revisit at the hardware pass: if the bundled Apollo version offers a safer path, switch. *Status: accepted risk — tracked in BUG_TRACKER.md.*
+- **`BUG_TRACKER.md` is owned by the monitoring agent**; the builder never edits it — statuses there are updated by the monitor on its own audit passes. *Status: accepted.*
+
 ## 2026-07-21 — v0.5 jobs + polish choices
 
 - **Job presets live on the node** (`/etc/secondwind/jobs.json`), mirroring the app-whitelist pattern: the host names a `preset_id` + input, never an image or command. Share-path inputs are traversal-checked on the node; file jobs run with `--network none`. *Status: accepted.*

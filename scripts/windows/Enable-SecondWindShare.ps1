@@ -4,12 +4,17 @@
 #   - an SMB share restricted to that account
 #
 # Requires elevation; the companion launches it with a UAC prompt the first
-# time. Prints a one-line JSON result with the share name and account.
+# time. The account password arrives via -AccountPasswordFile (elevated
+# processes don't inherit the caller's environment, and argv is visible in
+# process listings); the file is deleted after reading. -AccountPassword
+# remains for manual/support use only.
+# Prints a one-line JSON result with the share name and account.
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$FolderPath,
-    [Parameter(Mandatory = $true)][string]$AccountPassword,
+    [string]$AccountPassword = "",
+    [string]$AccountPasswordFile = "",
     [string]$ShareName = "SecondWind",
     [string]$AccountName = "SecondWindShare"
 )
@@ -22,6 +27,14 @@ function Write-Result([string]$Status, [string]$Message) {
 }
 
 try {
+    if ($AccountPasswordFile) {
+        $AccountPassword = (Get-Content -Path $AccountPasswordFile -Raw).Trim()
+        Remove-Item -Path $AccountPasswordFile -Force -ErrorAction SilentlyContinue
+    }
+    if (-not $AccountPassword) {
+        throw "No account password was provided."
+    }
+
     # 1. Dedicated local account (no interactive logon rights needed).
     $secure = ConvertTo-SecureString $AccountPassword -AsPlainText -Force
     $existing = Get-LocalUser -Name $AccountName -ErrorAction SilentlyContinue

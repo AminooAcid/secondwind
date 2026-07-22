@@ -169,20 +169,32 @@ pub fn connect_disk(
         }
     };
 
-    // 2. Attach on Windows.
-    let scripts = scripts_dir().ok_or(DiskControlError::ScriptsMissing)?;
+    // 2. Attach on Windows. Any failure from here rolls the node export
+    // back so it never lingers exposed with no host attached (BUG-015).
+    let rollback = |error: DiskControlError| {
+        let _ = node_client::post_disk_command(
+            endpoint,
+            Some(&state.certificate),
+            &DiskCommandRequest {
+                action: DiskAction::Disable,
+            },
+        );
+        error
+    };
+
+    let scripts = scripts_dir().ok_or_else(|| rollback(DiskControlError::ScriptsMissing))?;
     let script = scripts.join(CONNECT_SCRIPT);
     let address = endpoint
         .addresses
         .first()
-        .ok_or(DiskControlError::NoAddresses)?;
+        .ok_or_else(|| rollback(DiskControlError::NoAddresses))?;
     let args = connect_script_args(
         &script.to_string_lossy(),
         address,
         &target,
         node.disk.drive_letter,
     );
-    let stdout = run_powershell(&args)?;
+    let stdout = run_powershell(&args).map_err(rollback)?;
 
     Ok(DiskConnectOutcome {
         drive_letter: parse_attached_drive_letter(&stdout),

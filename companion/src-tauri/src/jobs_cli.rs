@@ -125,20 +125,36 @@ fn share_relative_path(state_root: &PathBuf, raw_input: &str) -> Result<String, 
 }
 
 /// Pure path containment: `input` must be strictly inside `root`.
+///
+/// Component-based on purpose: no byte arithmetic (Unicode case folding
+/// changes string length) and no trailing-separator pitfalls. Comparison
+/// is ASCII-case-insensitive like Windows paths; the returned relative
+/// path preserves the input's original casing.
 pub fn relative_inside(root: &str, input: &str) -> Option<String> {
-    let normalize = |value: &str| value.replace('/', "\\").trim_end_matches('\\').to_lowercase();
-    let root_normalized = normalize(root);
-    let input_normalized = normalize(input);
+    let components = |value: &str| -> Vec<String> {
+        value
+            .replace('/', "\\")
+            .split('\\')
+            .filter(|part| !part.is_empty())
+            .map(|part| part.to_string())
+            .collect()
+    };
 
-    let rest = input_normalized.strip_prefix(&root_normalized)?;
-    let rest = rest.strip_prefix('\\')?;
-    if rest.is_empty() {
+    let root_parts = components(root);
+    let input_parts = components(input);
+    if root_parts.is_empty() || input_parts.len() <= root_parts.len() {
         return None;
     }
 
-    // Preserve original casing from the input for the actual path.
-    let original_rest = &input[input.len() - rest.len()..];
-    Some(original_rest.replace('\\', "/"))
+    let prefix_matches = root_parts
+        .iter()
+        .zip(&input_parts)
+        .all(|(a, b)| a.eq_ignore_ascii_case(b));
+    if !prefix_matches {
+        return None;
+    }
+
+    Some(input_parts[root_parts.len()..].join("/"))
 }
 
 #[cfg(test)]
@@ -161,6 +177,34 @@ mod tests {
         );
         assert_eq!(
             relative_inside(r"C:\Users\Me\SecondWind", r"C:\Users\Me\SecondWind"),
+            None
+        );
+    }
+
+    #[test]
+    fn relative_inside_preserves_input_casing() {
+        assert_eq!(
+            relative_inside(r"c:\users\me\secondwind", r"C:\Users\Me\SecondWind\Videos\A.MKV"),
+            Some("Videos/A.MKV".to_string())
+        );
+    }
+
+    #[test]
+    fn relative_inside_survives_unicode_and_trailing_separators() {
+        // Non-ASCII case-changing chars must not panic (BUG-011: the old
+        // byte-arithmetic version could slice mid-character).
+        assert_eq!(
+            relative_inside(r"C:\Users\İbrahim\SecondWind", r"C:\Users\İbrahim\SecondWind\straße.txt"),
+            Some("straße.txt".to_string())
+        );
+        // Trailing separators on the input must not corrupt the result.
+        assert_eq!(
+            relative_inside(r"C:\Users\Me\SecondWind", "C:\\Users\\Me\\SecondWind\\dir\\"),
+            Some("dir".to_string())
+        );
+        // A sibling folder that merely starts with the root's name.
+        assert_eq!(
+            relative_inside(r"C:\Users\Me\SecondWind", r"C:\Users\Me\SecondWindOther\f.txt"),
             None
         );
     }

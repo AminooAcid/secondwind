@@ -44,13 +44,22 @@ pub fn detach_args(port: u32) -> Vec<String> {
 /// ```text
 /// Port 00: <Port in Use> at Full Speed(12Mbps)
 ///        unknown vendor : unknown product (0951:1666)
-///        ...
-///            -> remote bus/dev 001/002
+///        3-1 -> usbip://10.0.0.7:3240/1-1.4
 /// ```
-/// We match by the `(vendor:product)` pair, which the node reported.
-pub fn parse_attached_port(output: &str, vendor_id: &str, product_id: &str) -> Option<u32> {
-    let needle = format!("({}:{})", vendor_id.to_lowercase(), product_id.to_lowercase());
+/// Matching is by the remote **bus id** (the exact device the node
+/// exported), never by vendor:product — two identical flash drives must
+/// not detach each other. VID:PID is only a fallback when no remote-URL
+/// line is present.
+pub fn parse_attached_port(
+    output: &str,
+    bus_id: &str,
+    vendor_id: &str,
+    product_id: &str,
+) -> Option<u32> {
+    let bus_needle = format!("/{bus_id}");
+    let id_needle = format!("({}:{})", vendor_id.to_lowercase(), product_id.to_lowercase());
     let mut current_port: Option<u32> = None;
+    let mut id_fallback: Option<u32> = None;
 
     for line in output.lines() {
         let trimmed = line.trim();
@@ -59,11 +68,13 @@ pub fn parse_attached_port(output: &str, vendor_id: &str, product_id: &str) -> O
                 .split(':')
                 .next()
                 .and_then(|port| port.trim().parse().ok());
-        } else if trimmed.to_lowercase().contains(&needle) {
+        } else if trimmed.contains("usbip://") && trimmed.ends_with(&bus_needle) {
             return current_port;
+        } else if trimmed.to_lowercase().contains(&id_needle) && id_fallback.is_none() {
+            id_fallback = current_port;
         }
     }
-    None
+    id_fallback
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -127,7 +138,7 @@ pub fn detach_device(
         .output()
         .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
         .unwrap_or_default();
-    if let Some(port) = parse_attached_port(&port_output, vendor_id, product_id) {
+    if let Some(port) = parse_attached_port(&port_output, bus_id, vendor_id, product_id) {
         let _ = Command::new(usbip_client()).args(detach_args(port)).status();
     }
 
@@ -162,9 +173,7 @@ mod tests {
         assert_eq!(detach_args(3), vec!["detach", "-p", "3"]);
     }
 
-    #[test]
-    fn parses_attached_port_by_vendor_product() {
-        let output = r#"
+    const PORT_OUTPUT: &str = r#"
 Imported USB devices
 ====================
 Port 00: <Port in Use> at Full Speed(12Mbps)
@@ -173,10 +182,28 @@ Port 00: <Port in Use> at Full Speed(12Mbps)
 Port 01: <Port in Use> at High Speed(480Mbps)
        unknown vendor : unknown product (0951:1666)
        3-2 -> usbip://10.0.0.7:3240/1-1
+Port 02: <Port in Use> at High Speed(480Mbps)
+       unknown vendor : unknown product (0951:1666)
+       3-3 -> usbip://10.0.0.7:3240/2-1
 "#;
 
-        assert_eq!(parse_attached_port(output, "0951", "1666"), Some(1));
-        assert_eq!(parse_attached_port(output, "046D", "C31C"), Some(0));
-        assert_eq!(parse_attached_port(output, "ffff", "0000"), None);
+    #[test]
+    fn parses_attached_port_by_exact_bus_id() {
+        assert_eq!(parse_attached_port(PORT_OUTPUT, "1-1", "0951", "1666"), Some(1));
+        assert_eq!(parse_attached_port(PORT_OUTPUT, "1-1.4", "046D", "C31C"), Some(0));
+        assert_eq!(parse_attached_port(PORT_OUTPUT, "9-9", "ffff", "0000"), None);
+    }
+
+    #[test]
+    fn identical_devices_detach_the_right_port() {
+        // Two flash drives with the same VID:PID on different bus ids
+        // (BUG-014: VID:PID matching alone would always pick port 1).
+        assert_eq!(parse_attached_port(PORT_OUTPUT, "2-1", "0951", "1666"), Some(2));
+    }
+
+    #[test]
+    fn bus_id_suffix_matching_is_exact_not_prefix() {
+        // "1-1" must not match the "…/1-1.4" line.
+        assert_eq!(parse_attached_port(PORT_OUTPUT, "1", "ffff", "0000"), None);
     }
 }

@@ -138,13 +138,9 @@ fn run(config: &KioskRuntimeConfig) -> std::io::Result<()> {
 /// Clock + memory line for the ambient idle screen, read from the running
 /// system. Minute resolution so repaints are rare.
 fn ambient_stats() -> Option<screens::AmbientStats> {
-    let clock = Command::new("date")
-        .arg("+%H:%M")
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .unwrap_or_default();
+    // In-process local time: no subprocess in the render loop (a stalled
+    // spawn would freeze the kiosk).
+    let clock = chrono::Local::now().format("%H:%M").to_string();
 
     let stats_line = std::fs::read_to_string("/proc/meminfo")
         .ok()

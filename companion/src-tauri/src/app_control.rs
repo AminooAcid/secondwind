@@ -74,7 +74,7 @@ pub fn ensure_host_share(state_root: &Path) -> Result<ShareCredentials, String> 
         password: random_password()?,
     };
 
-    run_share_setup_elevated(&credentials)?;
+    run_share_setup_elevated(state_root, &credentials)?;
 
     fs::create_dir_all(state_root).map_err(|error| error.to_string())?;
     fs::write(
@@ -100,16 +100,33 @@ fn random_password() -> Result<String, String> {
 }
 
 /// First-time share setup needs elevation; `-Verb RunAs` triggers the UAC
-/// prompt. The password goes through an environment variable, not argv.
-fn run_share_setup_elevated(credentials: &ShareCredentials) -> Result<(), String> {
+/// prompt. Elevated children do NOT inherit the parent's environment, and
+/// argv is visible in process listings — so the password travels through a
+/// short-lived file in the user's own state dir (readable by the elevated
+/// same-user process, deleted by the script after use).
+fn run_share_setup_elevated(
+    state_root: &Path,
+    credentials: &ShareCredentials,
+) -> Result<(), String> {
     let scripts = crate::disk_control::scripts_dir()
         .ok_or("SecondWind's setup tools are missing from this installation.")?;
     let script = scripts.join("Enable-SecondWindShare.ps1");
 
+    fs::create_dir_all(state_root).map_err(|error| error.to_string())?;
+    let password_file = state_root.join("share-setup.pass");
+    sw_core::certificates::write_atomic(
+        &password_file,
+        credentials.password.as_bytes(),
+        true,
+    )
+    .map_err(|_| "SecondWind could not prepare the share setup.".to_string())?;
+
+    let quote = |value: &str| value.replace('\'', "''");
     let inner = format!(
-        "& '{}' -FolderPath '{}' -AccountPassword $env:SECONDWIND_SHARE_PW -ShareName '{}' -AccountName '{}'",
-        script.to_string_lossy().replace('\'', "''"),
-        credentials.folder.replace('\'', "''"),
+        "& '{}' -FolderPath '{}' -AccountPasswordFile '{}' -ShareName '{}' -AccountName '{}'",
+        quote(&script.to_string_lossy()),
+        quote(&credentials.folder),
+        quote(&password_file.to_string_lossy()),
         credentials.share_name,
         credentials.username,
     );
@@ -125,9 +142,11 @@ fn run_share_setup_elevated(credentials: &ShareCredentials) -> Result<(), String
                  '-NoProfile','-ExecutionPolicy','Bypass','-Command',@'\n{inner}\n'@; exit $p.ExitCode"
             ),
         ])
-        .env("SECONDWIND_SHARE_PW", &credentials.password)
         .status()
         .map_err(|_| "SecondWind could not start the share setup.".to_string())?;
+
+    // Belt and braces: the script deletes it, but never leave it behind.
+    let _ = fs::remove_file(&password_file);
 
     if status.success() {
         Ok(())
@@ -320,7 +339,9 @@ fn launch_on_node(
         };
     };
     let password_file = state_root.join("app-session.pass");
-    if fs::write(&password_file, &session.password).is_err() {
+    if sw_core::certificates::write_atomic(&password_file, session.password.as_bytes(), true)
+        .is_err()
+    {
         return LaunchOutcome::Failed {
             message: "SecondWind could not prepare the app session.".to_string(),
         };

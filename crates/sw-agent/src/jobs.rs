@@ -180,13 +180,50 @@ struct RunningJob {
     state: JobState,
 }
 
+/// Finished jobs kept for status queries; older ones are evicted FIFO so
+/// a long-running node never grows its job table unbounded (BUG-010).
+const MAX_FINISHED_JOBS: usize = 50;
+
 /// Production controller: presets from the node's file, jobs as `docker
 /// run` children reaped on every status call.
 #[derive(Debug)]
 pub struct DockerJobsController {
     presets_file: PathBuf,
     share_mountpoint: String,
-    jobs: Mutex<HashMap<String, RunningJob>>,
+    jobs: Mutex<JobTable>,
+}
+
+#[derive(Debug, Default)]
+struct JobTable {
+    jobs: HashMap<String, RunningJob>,
+    /// Completion order for FIFO eviction of finished entries.
+    finished_order: std::collections::VecDeque<String>,
+}
+
+impl JobTable {
+    /// Reaps finished children and evicts the oldest finished entries
+    /// beyond the cap.
+    fn reap_and_prune(&mut self) {
+        for (job_id, job) in self.jobs.iter_mut() {
+            if let Some(child) = job.child.as_mut()
+                && let Ok(Some(status)) = child.try_wait()
+            {
+                job.state = if status.success() {
+                    JobState::Succeeded
+                } else {
+                    JobState::Failed
+                };
+                job.child = None;
+                self.finished_order.push_back(job_id.clone());
+            }
+        }
+
+        while self.finished_order.len() > MAX_FINISHED_JOBS {
+            if let Some(oldest) = self.finished_order.pop_front() {
+                self.jobs.remove(&oldest);
+            }
+        }
+    }
 }
 
 impl DockerJobsController {
@@ -198,7 +235,7 @@ impl DockerJobsController {
         Some(Self {
             presets_file,
             share_mountpoint: share_mountpoint(),
-            jobs: Mutex::new(HashMap::new()),
+            jobs: Mutex::new(JobTable::default()),
         })
     }
 
@@ -225,7 +262,7 @@ impl JobsController for DockerJobsController {
             .map_err(|source| JobsError::Spawn { source })?;
 
         let job_id = Self::random_job_id()?;
-        self.jobs.lock().expect("jobs lock").insert(
+        self.jobs.lock().expect("jobs lock").jobs.insert(
             job_id.clone(),
             RunningJob {
                 preset_id: preset.preset_id.clone(),
@@ -237,19 +274,11 @@ impl JobsController for DockerJobsController {
     }
 
     fn jobs(&self) -> Vec<JobInfo> {
-        let mut jobs = self.jobs.lock().expect("jobs lock");
-        for job in jobs.values_mut() {
-            if let Some(child) = job.child.as_mut()
-                && let Ok(Some(status)) = child.try_wait() {
-                    job.state = if status.success() {
-                        JobState::Succeeded
-                    } else {
-                        JobState::Failed
-                    };
-                    job.child = None;
-                }
-        }
-        jobs.iter()
+        let mut table = self.jobs.lock().expect("jobs lock");
+        table.reap_and_prune();
+        table
+            .jobs
+            .iter()
             .map(|(job_id, job)| JobInfo {
                 job_id: job_id.clone(),
                 preset_id: job.preset_id.clone(),
@@ -387,6 +416,33 @@ mod tests {
             "/mnt/share",
         );
         assert!(matches!(wrong_kind, Err(JobsError::InvalidInput)));
+    }
+
+    #[test]
+    fn finished_jobs_are_evicted_fifo_beyond_the_cap() {
+        let mut table = JobTable::default();
+        for index in 0..(MAX_FINISHED_JOBS + 10) {
+            let job_id = format!("job-{index}");
+            table.jobs.insert(
+                job_id.clone(),
+                RunningJob {
+                    preset_id: "compress".to_string(),
+                    child: None,
+                    state: JobState::Succeeded,
+                },
+            );
+            table.finished_order.push_back(job_id);
+        }
+
+        table.reap_and_prune();
+
+        assert_eq!(table.jobs.len(), MAX_FINISHED_JOBS);
+        // Oldest entries evicted first.
+        assert!(!table.jobs.contains_key("job-0"));
+        assert!(table.jobs.contains_key(&format!(
+            "job-{}",
+            MAX_FINISHED_JOBS + 9
+        )));
     }
 
     #[test]

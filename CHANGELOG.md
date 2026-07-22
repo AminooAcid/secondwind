@@ -3,6 +3,31 @@
 All notable changes to SecondWind. Format loosely follows Keep a Changelog;
 versions are tagged only after their phase acceptance passes on hardware.
 
+## [Unreleased — audit fixes, round 2]
+
+### Fixed
+- Agent job table now evicts finished jobs FIFO (cap 50) instead of
+  growing forever (BUG-010).
+- Explorer-job path containment rewritten component-based: no more
+  potential panic on Unicode case folding or trailing separators, and
+  look-alike sibling folders no longer match (BUG-011).
+- First-time share setup passes the account password to the elevated
+  script via an owner-restricted, self-deleting file — elevated processes
+  don't inherit the caller's environment, so the old env-var handoff
+  produced an empty password (BUG-012).
+- USB detach resolves the local port by the exact remote bus id, so two
+  identical devices can no longer detach each other (BUG-014).
+- Failed host-side disk attach now rolls the node's export back instead
+  of leaving it exposed (BUG-015).
+- App-session password file written atomically and owner-only (BUG-016).
+- Kiosk clock uses in-process time instead of spawning `date` in the
+  render loop (BUG-017).
+
+### Known accepted risk
+- Apollo dashboard credentials are set via its `--creds` argv (upstream
+  offers no alternative); one-time local exposure documented in
+  `docs/DECISIONS.md` (BUG-013).
+
 ## [Unreleased — v0.5 code-complete]
 
 ### Added
