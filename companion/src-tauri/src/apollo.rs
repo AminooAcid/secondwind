@@ -25,8 +25,10 @@ pub const APOLLO_DIR_ENV: &str = "SECONDWIND_APOLLO_DIR";
 pub const APOLLO_SERVICE_ENV: &str = "SECONDWIND_APOLLO_SERVICE";
 pub const APOLLO_API_ENV: &str = "SECONDWIND_APOLLO_API";
 
-/// Upstream defaults, used only as detection fallbacks.
-const DEFAULT_SERVICE_NAMES: [&str; 2] = ["Apollo Service", "SunshineService"];
+/// Upstream defaults, used only as detection fallbacks. `sc.exe` matches
+/// the *service name*, not the display name — the real Apollo installs as
+/// `ApolloService` (display "Apollo Service"), verified on hardware.
+const DEFAULT_SERVICE_NAMES: [&str; 3] = ["ApolloService", "SunshineService", "Apollo Service"];
 const DEFAULT_EXECUTABLE_NAMES: [&str; 2] = ["sunshine.exe", "apollo.exe"];
 const DEFAULT_CONFIG_RELATIVE: &str = "config/sunshine.conf";
 const DEFAULT_API_BASE: &str = "https://localhost:47990";

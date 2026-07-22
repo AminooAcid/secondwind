@@ -9,6 +9,11 @@ User=secondwind
 Group=secondwind
 Environment=SECONDWIND_XPRA_DISPLAY=:100
 EnvironmentFile=-/etc/secondwind/sw-xpra.env
+# Free a leftover session before starting: xpra can survive a systemd
+# restart and keep the TCP port, causing an "address already in use"
+# crash loop (found on the first hardware node). Best-effort, never fatal.
+ExecStartPre=-/bin/sh -c 'xpra stop "$SECONDWIND_XPRA_DISPLAY" 2>/dev/null; \
+    pkill -f "xpra.*$SECONDWIND_XPRA_PORT" 2>/dev/null; sleep 1; true'
 # One headless session all node apps run inside; the host's client attaches
 # over TCP with the first-boot-generated password. Bind address/port come
 # from the env file, never from source.
@@ -17,8 +22,10 @@ ExecStart=/bin/sh -c 'exec xpra start "$SECONDWIND_XPRA_DISPLAY" --daemon=no \
     --auth=file:filename="$SECONDWIND_XPRA_PASSWORD_FILE" \
     --mdns=no --webcam=no --pulseaudio=no --notifications=no \
     --system-tray=no --clipboard=yes'
+# Kill the whole cgroup on stop so no server escapes to hold the port.
+KillMode=control-group
 Restart=on-failure
-RestartSec=2
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
