@@ -19,6 +19,7 @@ const CERTIFICATE_FILE_ENV: &str = "SECONDWIND_AGENT_CERTIFICATE_FILE";
 const PRIVATE_KEY_FILE_ENV: &str = "SECONDWIND_AGENT_PRIVATE_KEY_FILE";
 const BIND_ENV: &str = "SECONDWIND_AGENT_BIND";
 const NODE_NAME_ENV: &str = "SECONDWIND_AGENT_NODE_NAME";
+const KIOSK_STATE_FILE_ENV: &str = "SECONDWIND_KIOSK_STATE_FILE";
 const DEFAULT_NODE_NAME: &str = "SecondWind node";
 
 #[tokio::main]
@@ -40,7 +41,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
     let state =
         AgentState::detect_with_pairing(identity.node_uuid, identity.node_name.clone(), pairing)
-            .with_identity_store(runtime.state_file.clone());
+            .with_identity_store(runtime.state_file.clone())
+            .with_kiosk_state_file(runtime.kiosk_state_file.clone());
+    state.sync_kiosk();
 
     if let Some(bind_addr) = runtime.bind_addr {
         let tls_config = agent_tls_config(&certificate, identity.paired_host.as_ref())?;
@@ -53,7 +56,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             advertised_port,
         )?;
         axum_server::from_tcp_rustls(listener, tls_config)?
-            .serve(router(state).into_make_service())
+            .serve(
+                router(state)
+                    .into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
             .await?;
     } else {
         let health = health_response(&state);
@@ -73,6 +79,7 @@ struct AgentRuntimeConfig {
     private_key_file: PathBuf,
     bind_addr: Option<SocketAddr>,
     node_name: String,
+    kiosk_state_file: Option<PathBuf>,
 }
 
 impl AgentRuntimeConfig {
@@ -104,12 +111,17 @@ impl AgentRuntimeConfig {
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_NODE_NAME.to_string());
 
+        let kiosk_state_file = env::var_os(KIOSK_STATE_FILE_ENV)
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty());
+
         Ok(Self {
             state_file,
             certificate_file,
             private_key_file,
             bind_addr,
             node_name,
+            kiosk_state_file,
         })
     }
 }

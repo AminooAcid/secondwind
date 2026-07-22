@@ -3,6 +3,7 @@ pub mod capabilities;
 pub mod certificates;
 pub mod config;
 pub mod discovery;
+pub mod kiosk;
 pub mod pairing;
 pub mod protocol;
 
@@ -11,5 +12,6 @@ pub use capabilities::*;
 pub use certificates::*;
 pub use config::*;
 pub use discovery::*;
+pub use kiosk::*;
 pub use pairing::*;
 pub use protocol::*;

@@ -41,3 +41,34 @@ pub struct FeatureToggleRequest {
 pub enum FeatureKind {
     Screen,
 }
+
+/// Host → node screen control.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenCommandRequest {
+    pub action: ScreenAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum ScreenAction {
+    /// Bring the node screen up. The node connects its streaming client back
+    /// to the requesting host. `stream_pair_pin` is a one-shot PIN the host
+    /// has armed on its streaming server, sent only while that inner pairing
+    /// does not exist yet.
+    Connect { stream_pair_pin: Option<String> },
+    Disconnect,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenStatusResponse {
+    pub screen: ScreenState,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ScreenState {
+    NotPaired,
+    Idle,
+    Streaming { host_address: String },
+}
