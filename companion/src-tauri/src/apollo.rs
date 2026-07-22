@@ -495,12 +495,23 @@ pub fn restart_service_and_wait(credentials: &ApolloCredentials) -> Result<(), A
         std::thread::sleep(Duration::from_millis(500));
     }
 
-    wait_for_api_ready(&api_base(), credentials)
+    wait_for_api_ready_at(&api_base(), credentials)
 }
 
 /// Polls the dashboard API until an authenticated request succeeds (the
-/// service has finished loading our credentials), or times out.
-fn wait_for_api_ready(api_base: &str, credentials: &ApolloCredentials) -> Result<(), ApolloError> {
+/// service has finished coming up and loaded our credentials), or times
+/// out. A timeout means either still-down or stale credentials — the
+/// caller restarts in both cases.
+pub fn wait_for_api_ready(
+    credentials: &ApolloCredentials,
+) -> Result<(), ApolloError> {
+    wait_for_api_ready_at(&api_base(), credentials)
+}
+
+fn wait_for_api_ready_at(
+    api_base: &str,
+    credentials: &ApolloCredentials,
+) -> Result<(), ApolloError> {
     let agent = localhost_agent()?;
     let authorization = format!(
         "Basic {}",
