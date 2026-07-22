@@ -1,3 +1,9 @@
+//! Shared self-signed certificate store used by both peers.
+//!
+//! The node agent and the host companion both persist a self-signed
+//! certificate + private key and exchange fingerprints during pairing, so the
+//! storage, generation, and fingerprinting logic lives in `sw-core`.
+
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -8,7 +14,7 @@ use rcgen::generate_simple_self_signed;
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NodeCertificate {
+pub struct CertificateMaterial {
     pub certificate_pem: String,
     pub private_key_pem: String,
     pub fingerprint: String,
@@ -18,7 +24,7 @@ pub fn load_or_create_certificate(
     certificate_file: impl AsRef<Path>,
     private_key_file: impl AsRef<Path>,
     subject_name: impl Into<String>,
-) -> Result<NodeCertificate, CertificateStoreError> {
+) -> Result<CertificateMaterial, CertificateStoreError> {
     let certificate_file = certificate_file.as_ref();
     let private_key_file = private_key_file.as_ref();
     let subject_name = subject_name.into();
@@ -29,7 +35,7 @@ pub fn load_or_create_certificate(
     ) {
         (Ok(certificate_pem), Ok(private_key_pem)) => {
             match certificate_fingerprint(&certificate_pem) {
-                Ok(fingerprint) => Ok(NodeCertificate {
+                Ok(fingerprint) => Ok(CertificateMaterial {
                     certificate_pem,
                     private_key_pem,
                     fingerprint,
@@ -65,22 +71,27 @@ pub fn load_or_create_certificate(
 
 pub fn certificate_fingerprint(certificate_pem: &str) -> Result<String, CertificateStoreError> {
     let certificate_der = certificate_der_from_pem(certificate_pem)?;
-    let digest = Sha256::digest(certificate_der);
+    Ok(fingerprint_of_der(&certificate_der))
+}
 
-    Ok(format!("sha256:{}", hex::encode_upper(digest)))
+pub fn fingerprint_of_der(certificate_der: &[u8]) -> String {
+    let digest = Sha256::digest(certificate_der);
+    format!("sha256:{}", hex::encode_upper(digest))
 }
 
 fn regenerate_certificate_files(
     certificate_file: &Path,
     private_key_file: &Path,
     subject_name: String,
-) -> Result<NodeCertificate, CertificateStoreError> {
+) -> Result<CertificateMaterial, CertificateStoreError> {
     let generated = generate_certificate(subject_name)?;
     write_certificate_files(certificate_file, private_key_file, &generated)?;
     Ok(generated)
 }
 
-fn generate_certificate(subject_name: String) -> Result<NodeCertificate, CertificateStoreError> {
+fn generate_certificate(
+    subject_name: String,
+) -> Result<CertificateMaterial, CertificateStoreError> {
     let certified = generate_simple_self_signed(vec![subject_name]).map_err(|source| {
         CertificateStoreError::Generate {
             source: source.to_string(),
@@ -90,7 +101,7 @@ fn generate_certificate(subject_name: String) -> Result<NodeCertificate, Certifi
     let private_key_pem = certified.key_pair.serialize_pem();
     let fingerprint = certificate_fingerprint(&certificate_pem)?;
 
-    Ok(NodeCertificate {
+    Ok(CertificateMaterial {
         certificate_pem,
         private_key_pem,
         fingerprint,
@@ -100,7 +111,7 @@ fn generate_certificate(subject_name: String) -> Result<NodeCertificate, Certifi
 fn write_certificate_files(
     certificate_file: &Path,
     private_key_file: &Path,
-    certificate: &NodeCertificate,
+    certificate: &CertificateMaterial,
 ) -> Result<(), CertificateStoreError> {
     create_parent(certificate_file)?;
     create_parent(private_key_file)?;
@@ -176,7 +187,7 @@ impl std::fmt::Display for CertificateStoreError {
                     path.display()
                 )
             }
-            Self::Generate { .. } => write!(formatter, "failed to generate node certificate"),
+            Self::Generate { .. } => write!(formatter, "failed to generate certificate"),
             Self::InvalidPem => write!(formatter, "certificate file is not valid PEM"),
         }
     }
@@ -209,8 +220,8 @@ mod tests {
             let _ = fs::remove_dir_all(&root);
 
             Self {
-                certificate_file: root.join("node-cert.pem"),
-                private_key_file: root.join("node-key.pem"),
+                certificate_file: root.join("peer-cert.pem"),
+                private_key_file: root.join("peer-key.pem"),
             }
         }
     }
@@ -230,7 +241,7 @@ mod tests {
         let certificate = load_or_create_certificate(
             &files.certificate_file,
             &files.private_key_file,
-            "node-uuid",
+            "peer-uuid",
         )
         .expect("create certificate");
 
@@ -246,14 +257,14 @@ mod tests {
         let original = load_or_create_certificate(
             &files.certificate_file,
             &files.private_key_file,
-            "node-uuid",
+            "peer-uuid",
         )
         .expect("create certificate");
 
         let loaded = load_or_create_certificate(
             &files.certificate_file,
             &files.private_key_file,
-            "different-node-uuid",
+            "different-peer-uuid",
         )
         .expect("load certificate");
 
@@ -270,7 +281,7 @@ mod tests {
         let certificate = load_or_create_certificate(
             &files.certificate_file,
             &files.private_key_file,
-            "node-uuid",
+            "peer-uuid",
         )
         .expect("self-heal incomplete store");
 
@@ -290,10 +301,25 @@ mod tests {
         let certificate = load_or_create_certificate(
             &files.certificate_file,
             &files.private_key_file,
-            "node-uuid",
+            "peer-uuid",
         )
         .expect("self-heal invalid cert");
 
         assert!(certificate.fingerprint.starts_with("sha256:"));
+    }
+
+    #[test]
+    fn der_fingerprint_matches_pem_fingerprint() {
+        let files = TempFileSet::new("der-fingerprint");
+        let certificate = load_or_create_certificate(
+            &files.certificate_file,
+            &files.private_key_file,
+            "peer-uuid",
+        )
+        .expect("create certificate");
+
+        let der = certificate_der_from_pem(&certificate.certificate_pem).expect("der");
+
+        assert_eq!(fingerprint_of_der(&der), certificate.fingerprint);
     }
 }

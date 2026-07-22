@@ -874,16 +874,12 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "axum-server",
- "base64",
  "getrandom 0.2.17",
- "hex",
  "mdns-sd",
- "rcgen",
  "rustls",
  "rustls-pemfile",
  "serde",
  "serde_json",
- "sha2",
  "sw-core",
  "tokio",
 ]
@@ -892,8 +888,12 @@ dependencies = [
 name = "sw-core"
 version = "0.1.0"
 dependencies = [
+ "base64",
+ "hex",
+ "rcgen",
  "serde",
  "serde_json",
+ "sha2",
  "uuid",
 ]
 

@@ -4,13 +4,14 @@ use axum_server::tls_rustls::RustlsConfig;
 use rustls::{RootCertStore, ServerConfig, server::WebPkiClientVerifier};
 use rustls_pemfile::private_key;
 
-use crate::{
-    certificates::{CertificateStoreError, NodeCertificate, certificate_der_from_pem},
-    identity::PairedHostTrust,
+use sw_core::certificates::{
+    CertificateMaterial, CertificateStoreError, certificate_der_from_pem,
 };
 
+use crate::identity::PairedHostTrust;
+
 pub fn agent_tls_config(
-    certificate: &NodeCertificate,
+    certificate: &CertificateMaterial,
     paired_host: Option<&PairedHostTrust>,
 ) -> Result<RustlsConfig, TlsConfigError> {
     let node_cert = rustls::pki_types::CertificateDer::from(certificate_der_from_pem(
@@ -114,7 +115,7 @@ mod tests {
     use std::{fs, path::PathBuf};
 
     use super::*;
-    use crate::certificates::load_or_create_certificate;
+    use sw_core::certificates::load_or_create_certificate;
 
     struct TempCertificateFiles {
         root: PathBuf,
@@ -128,7 +129,7 @@ mod tests {
             Self { root }
         }
 
-        fn certificate(&self, name: &str) -> NodeCertificate {
+        fn certificate(&self, name: &str) -> CertificateMaterial {
             load_or_create_certificate(
                 self.root.join(format!("{name}.pem")),
                 self.root.join(format!("{name}.key")),
