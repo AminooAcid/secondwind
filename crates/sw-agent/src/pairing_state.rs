@@ -20,29 +20,40 @@ impl PairingState {
         Self::Paired { host_name }
     }
 
+    /// Network-facing status. Never includes the PIN or QR payload — those
+    /// are proximity proofs reserved for the node's physical screen; use
+    /// [`PairingState::kiosk_display`] for the local kiosk.
     pub fn status_response(&self) -> PairingStatusResponse {
         match self {
             Self::Unavailable { reason } => PairingStatusResponse {
                 status: PairingStatus::Unavailable,
-                offer: None,
-                qr_payload: None,
+                node_certificate_fingerprint: None,
                 paired_host_name: None,
                 message: Some(reason.clone()),
             },
             Self::Waiting { offer } => PairingStatusResponse {
                 status: PairingStatus::WaitingForHost,
-                offer: Some(offer.clone()),
-                qr_payload: Some(PairingQrPayload::from_offer(offer)),
+                node_certificate_fingerprint: Some(offer.certificate_fingerprint.clone()),
                 paired_host_name: None,
                 message: None,
             },
             Self::Paired { host_name } => PairingStatusResponse {
                 status: PairingStatus::Paired,
-                offer: None,
-                qr_payload: None,
+                node_certificate_fingerprint: None,
                 paired_host_name: Some(host_name.clone()),
                 message: None,
             },
+        }
+    }
+
+    /// Local kiosk view of pairing: full offer + QR payload for the node's
+    /// own screen only.
+    pub fn kiosk_display(&self) -> Option<(PairingOffer, PairingQrPayload)> {
+        match self {
+            Self::Waiting { offer } => {
+                Some((offer.clone(), PairingQrPayload::from_offer(offer)))
+            }
+            _ => None,
         }
     }
 
@@ -196,12 +207,30 @@ mod tests {
     }
 
     #[test]
-    fn waiting_status_exposes_offer() {
+    fn waiting_status_never_leaks_pin_over_network() {
         let status = waiting_state().status_response();
 
         assert_eq!(status.status, PairingStatus::WaitingForHost);
-        assert!(status.offer.is_some());
-        assert!(status.qr_payload.is_some());
+        assert_eq!(
+            status.node_certificate_fingerprint.as_deref(),
+            Some("fingerprint")
+        );
+        let json = serde_json::to_string(&status).expect("serialize status");
+        assert!(!json.contains("123456"));
+        assert!(!json.contains("pin"));
+    }
+
+    #[test]
+    fn kiosk_display_exposes_offer_and_qr_locally() {
+        let (offer, qr) = waiting_state().kiosk_display().expect("kiosk display");
+
+        assert_eq!(offer.pin, fixed_pin_for_tests());
+        assert_eq!(qr.pin, fixed_pin_for_tests());
+        assert!(
+            PairingState::paired("host".to_string())
+                .kiosk_display()
+                .is_none()
+        );
     }
 
     #[test]

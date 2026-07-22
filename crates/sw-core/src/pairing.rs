@@ -74,11 +74,16 @@ pub struct PairingResponse {
     pub node_certificate_fingerprint: String,
 }
 
+/// Network-facing pairing status.
+///
+/// This intentionally never carries the pairing PIN or QR payload: those are
+/// proximity proofs and may only be shown on the node's physical screen (the
+/// kiosk reads them locally). Exposing them over the API would let any LAN
+/// peer pair without seeing the node.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PairingStatusResponse {
     pub status: PairingStatus,
-    pub offer: Option<PairingOffer>,
-    pub qr_payload: Option<PairingQrPayload>,
+    pub node_certificate_fingerprint: Option<String>,
     pub paired_host_name: Option<String>,
     pub message: Option<String>,
 }
