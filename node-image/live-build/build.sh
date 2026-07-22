@@ -43,6 +43,7 @@ cp "$REPO_ROOT/node-image/systemd/sw-agent.service" \
    "$REPO_ROOT/node-image/systemd/sw-xpra.service" \
    "$REPO_ROOT/node-image/systemd/sw-xpra-provision.service" \
    "$REPO_ROOT/node-image/systemd/secondwind-share.service" \
+   "$REPO_ROOT/node-image/systemd/secondwind-usbipd.service" \
    "$HERE/config/includes.chroot/etc/systemd/system/"
 
 mkdir -p "$HERE/config/includes.chroot/usr/local/lib/secondwind"
@@ -51,6 +52,7 @@ cp "$REPO_ROOT/scripts/node/secondwind-disk.sh" \
    "$REPO_ROOT/scripts/node/secondwind-share.sh" \
    "$REPO_ROOT/scripts/node/secondwind-run-synced.sh" \
    "$REPO_ROOT/scripts/node/secondwind-xpra-provision.sh" \
+   "$REPO_ROOT/scripts/node/secondwind-usb.sh" \
    "$HERE/config/includes.chroot/usr/local/lib/secondwind/"
 chmod 0755 "$HERE/config/includes.chroot/usr/local/lib/secondwind/"*.sh
 

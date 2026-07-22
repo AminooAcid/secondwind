@@ -18,6 +18,10 @@ xpra
 cifs-utils
 rsync
 
+# USB feature (v0.4): usbip server + tools.
+usbip
+sudo
+
 # v1 app catalog (plan §6.4).
 firefox-esr
 chromium

@@ -92,6 +92,7 @@ impl HostState {
                 },
                 disk: DiskFeatureConfig::default(),
                 wake: WakeConfig::default(),
+                usb_auto_attach: Vec::new(),
             },
         );
         self.save()

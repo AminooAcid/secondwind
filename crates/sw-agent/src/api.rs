@@ -11,9 +11,10 @@ use sw_core::{
     HealthResponse, KioskState, NodeCapabilities, NodeUuid, PairingRequest, PairingResponse,
     PairingStatusResponse, ScreenAction, ScreenCapabilities, ScreenCommandRequest, ScreenState,
     ScreenStatusResponse, ServiceStatus, ShareConfigRequest, ShareState, ShareStatusResponse,
+    UsbAction, UsbCommandRequest, UsbDevicesResponse, UsbState,
     agent_api::{
         APPS_PATH, CAPABILITIES_PATH, DISK_PATH, HEALTH_PATH, PAIRING_PATH, SCREEN_PATH,
-        SHARE_PATH,
+        SHARE_PATH, USB_PATH,
     },
     kiosk::write_kiosk_state,
 };
@@ -25,6 +26,7 @@ use crate::{
     identity::{PairedHostTrust, persist_paired_host},
     pairing_state::{PairingState, unavailable_pairing},
     share::{SharedShareController, share_state},
+    usb::SharedUsbController,
 };
 
 #[derive(Debug, Clone)]
@@ -44,6 +46,8 @@ pub struct AgentState {
     pub apps: Option<SharedAppsController>,
     /// v0.3 host share mount; None when the image has no share support.
     pub share: Option<SharedShareController>,
+    /// v0.4 USB export; None when the image has no usbip support.
+    pub usb: Option<SharedUsbController>,
 }
 
 impl AgentState {
@@ -79,6 +83,7 @@ impl AgentState {
             disk: None,
             apps: None,
             share: None,
+            usb: None,
         }
     }
 
@@ -94,6 +99,11 @@ impl AgentState {
 
     pub fn with_share_controller(mut self, share: Option<SharedShareController>) -> Self {
         self.share = share;
+        self
+    }
+
+    pub fn with_usb_controller(mut self, usb: Option<SharedUsbController>) -> Self {
+        self.usb = usb;
         self
     }
 
@@ -196,6 +206,7 @@ pub fn router(state: AgentState) -> Router {
         .route(DISK_PATH, get(disk_status).post(disk_command))
         .route(APPS_PATH, get(apps_status).post(launch_app))
         .route(SHARE_PATH, get(share_status).post(configure_share))
+        .route(USB_PATH, get(usb_devices).post(usb_command))
         .with_state(state)
 }
 
@@ -262,6 +273,19 @@ pub async fn launch_app(
     Json(request): Json<AppLaunchRequest>,
 ) -> Json<AppLaunchResponse> {
     Json(apply_app_launch(&state, request))
+}
+
+pub async fn usb_devices(
+    axum::extract::State(state): axum::extract::State<AgentState>,
+) -> Json<UsbDevicesResponse> {
+    Json(usb_devices_response(&state))
+}
+
+pub async fn usb_command(
+    axum::extract::State(state): axum::extract::State<AgentState>,
+    Json(request): Json<UsbCommandRequest>,
+) -> Json<UsbDevicesResponse> {
+    Json(apply_usb_command(&state, request))
 }
 
 pub async fn share_status(
@@ -557,6 +581,69 @@ pub fn apply_app_launch(state: &AgentState, request: AppLaunchRequest) -> AppLau
     }
 }
 
+pub fn usb_devices_response(state: &AgentState) -> UsbDevicesResponse {
+    if !is_paired(state) {
+        return UsbDevicesResponse {
+            usb: UsbState::NotPaired,
+            devices: Vec::new(),
+            message: Some("This node is not paired with a host yet.".to_string()),
+        };
+    }
+
+    match &state.usb {
+        None => UsbDevicesResponse {
+            usb: UsbState::Unavailable {
+                reason: "This node has no USB sharing configured.".to_string(),
+            },
+            devices: Vec::new(),
+            message: None,
+        },
+        Some(controller) if !controller.available() => UsbDevicesResponse {
+            usb: UsbState::Unavailable {
+                reason: "This node has no USB sharing configured.".to_string(),
+            },
+            devices: Vec::new(),
+            message: None,
+        },
+        Some(controller) => UsbDevicesResponse {
+            usb: UsbState::Ready,
+            devices: controller.devices(),
+            message: None,
+        },
+    }
+}
+
+pub fn apply_usb_command(state: &AgentState, request: UsbCommandRequest) -> UsbDevicesResponse {
+    if !is_paired(state) {
+        return UsbDevicesResponse {
+            usb: UsbState::NotPaired,
+            devices: Vec::new(),
+            message: Some("Pair with this node before sharing USB devices.".to_string()),
+        };
+    }
+
+    let Some(controller) = &state.usb else {
+        return UsbDevicesResponse {
+            usb: UsbState::Unavailable {
+                reason: "This node has no USB sharing configured.".to_string(),
+            },
+            devices: Vec::new(),
+            message: None,
+        };
+    };
+
+    let result = match &request.action {
+        UsbAction::Bind { bus_id } => controller.bind(bus_id),
+        UsbAction::Unbind { bus_id } => controller.unbind(bus_id),
+    };
+
+    UsbDevicesResponse {
+        usb: UsbState::Ready,
+        devices: controller.devices(),
+        message: result.err().map(|error| error.to_string()),
+    }
+}
+
 pub fn share_status_response(state: &AgentState) -> ShareStatusResponse {
     if !is_paired(state) {
         return ShareStatusResponse {
@@ -652,6 +739,7 @@ mod tests {
             disk: None,
             apps: None,
             share: None,
+            usb: None,
         }
     }
 
@@ -1035,6 +1123,48 @@ mod tests {
         );
 
         assert_eq!(response.share, sw_core::ShareState::Mounted);
+    }
+
+    #[test]
+    fn usb_bind_and_unbind_round_trip_when_paired() {
+        use crate::usb::test_support::FakeUsbController;
+
+        let controller = Arc::new(FakeUsbController {
+            devices: vec![sw_core::UsbDeviceInfo {
+                bus_id: "1-1".to_string(),
+                vendor_id: "0951".to_string(),
+                product_id: "1666".to_string(),
+                description: "Flash drive".to_string(),
+                bound: false,
+            }],
+            ..Default::default()
+        });
+        let mut state = test_state(Vec::new()).with_usb_controller(Some(controller));
+        state.pairing = Arc::new(RwLock::new(PairingState::paired("host".to_string())));
+
+        let unpaired_check = usb_devices_response(&test_state(Vec::new()));
+        assert!(matches!(unpaired_check.usb, sw_core::UsbState::NotPaired));
+
+        let bound = apply_usb_command(
+            &state,
+            sw_core::UsbCommandRequest {
+                action: sw_core::UsbAction::Bind {
+                    bus_id: "1-1".to_string(),
+                },
+            },
+        );
+        assert!(bound.devices[0].bound);
+        assert!(bound.message.is_none());
+
+        let unbound = apply_usb_command(
+            &state,
+            sw_core::UsbCommandRequest {
+                action: sw_core::UsbAction::Unbind {
+                    bus_id: "1-1".to_string(),
+                },
+            },
+        );
+        assert!(!unbound.devices[0].bound);
     }
 
     #[test]

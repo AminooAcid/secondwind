@@ -16,4 +16,6 @@ systemctl enable secondwind-disk.service
 # Apps: one supervised session; password regenerated each boot.
 systemctl enable sw-xpra-provision.service
 systemctl enable sw-xpra.service
+# USB: export daemon.
+systemctl enable secondwind-usbipd.service
 systemctl set-default graphical.target

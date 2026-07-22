@@ -78,6 +78,17 @@ pub struct NodeConfig {
     /// pairing time; defaulted for older configs.
     #[serde(default)]
     pub wake: WakeConfig,
+    /// v0.4: devices to auto-attach whenever this node connects.
+    #[serde(default)]
+    pub usb_auto_attach: Vec<UsbAutoAttachRule>,
+}
+
+/// Matches a device by vendor/product id (lowercase hex, as reported by the
+/// node), independent of which port it is plugged into.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsbAutoAttachRule {
+    pub vendor_id: String,
+    pub product_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -150,6 +161,10 @@ mod tests {
                 wake: WakeConfig {
                     mac_addresses: vec!["aa:bb:cc:dd:ee:ff".to_string()],
                 },
+                usb_auto_attach: vec![UsbAutoAttachRule {
+                    vendor_id: "0951".to_string(),
+                    product_id: "1666".to_string(),
+                }],
             },
         );
 

@@ -1,0 +1,2 @@
+# The SecondWind agent may run exactly the USB bind/unbind wrapper.
+secondwind ALL=(root) NOPASSWD: /usr/local/lib/secondwind/secondwind-usb.sh

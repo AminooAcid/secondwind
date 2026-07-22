@@ -183,3 +183,45 @@ pub enum ShareState {
     NotConfigured,
     Mounted,
 }
+
+/// USB sharing (v0.4): the node lists its local USB devices and can bind
+/// them to the usbip export; the host attaches bound devices.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsbDevicesResponse {
+    pub usb: UsbState,
+    pub devices: Vec<UsbDeviceInfo>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum UsbState {
+    NotPaired,
+    Unavailable { reason: String },
+    Ready,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsbDeviceInfo {
+    /// Kernel bus id, e.g. `1-1.4`.
+    pub bus_id: String,
+    /// Lowercase hex vendor id, e.g. `0951`.
+    pub vendor_id: String,
+    /// Lowercase hex product id, e.g. `1666`.
+    pub product_id: String,
+    pub description: String,
+    /// Whether the device is currently exported for the host.
+    pub bound: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsbCommandRequest {
+    pub action: UsbAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum UsbAction {
+    Bind { bus_id: String },
+    Unbind { bus_id: String },
+}

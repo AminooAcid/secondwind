@@ -1,0 +1,14 @@
+[Unit]
+Description=SecondWind USB export daemon (usbipd)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/sbin/modprobe usbip-host
+ExecStart=/usr/sbin/usbipd
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

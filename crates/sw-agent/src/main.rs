@@ -15,6 +15,7 @@ use sw_agent::{
     pairing_state::{PairingState, runtime_pairing_offer},
     share::{SharedShareController, SystemdShareController},
     tls::agent_tls_config,
+    usb::{SharedUsbController, SysUsbController},
 };
 
 const STATE_FILE_ENV: &str = "SECONDWIND_AGENT_STATE_FILE";
@@ -48,13 +49,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map(|controller| std::sync::Arc::new(controller) as SharedAppsController);
     let share_controller: Option<SharedShareController> = SystemdShareController::from_env()
         .map(|controller| std::sync::Arc::new(controller) as SharedShareController);
+    let usb_controller: Option<SharedUsbController> =
+        Some(std::sync::Arc::new(SysUsbController) as SharedUsbController);
     let state =
         AgentState::detect_with_pairing(identity.node_uuid, identity.node_name.clone(), pairing)
             .with_identity_store(runtime.state_file.clone())
             .with_kiosk_state_file(runtime.kiosk_state_file.clone())
             .with_disk_controller(disk_controller)
             .with_apps_controller(apps_controller)
-            .with_share_controller(share_controller);
+            .with_share_controller(share_controller)
+            .with_usb_controller(usb_controller);
     state.sync_kiosk();
 
     if let Some(bind_addr) = runtime.bind_addr {
