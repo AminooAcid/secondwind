@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::NodeUuid;
 
+pub const PAIRING_QR_PAYLOAD_VERSION: u16 = 1;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PairingPin(String);
 
@@ -34,6 +36,31 @@ pub struct PairingOffer {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairingQrPayload {
+    pub schema_version: u16,
+    pub node_uuid: NodeUuid,
+    pub node_name: String,
+    pub certificate_fingerprint: String,
+    pub pin: PairingPin,
+}
+
+impl PairingQrPayload {
+    pub fn from_offer(offer: &PairingOffer) -> Self {
+        Self {
+            schema_version: PAIRING_QR_PAYLOAD_VERSION,
+            node_uuid: offer.node_uuid,
+            node_name: offer.node_name.clone(),
+            certificate_fingerprint: offer.certificate_fingerprint.clone(),
+            pin: offer.pin.clone(),
+        }
+    }
+
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PairingRequest {
     pub host_name: String,
     pub host_certificate_fingerprint: String,
@@ -46,9 +73,34 @@ pub struct PairingResponse {
     pub node_certificate_fingerprint: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairingStatusResponse {
+    pub status: PairingStatus,
+    pub offer: Option<PairingOffer>,
+    pub qr_payload: Option<PairingQrPayload>,
+    pub paired_host_name: Option<String>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PairingStatus {
+    Unavailable,
+    WaitingForHost,
+    Paired,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_offer() -> PairingOffer {
+        PairingOffer {
+            node_uuid: NodeUuid::new("00000000-0000-4000-8000-000000000004").expect("valid uuid"),
+            node_name: "node".to_string(),
+            certificate_fingerprint: "sha256:fingerprint".to_string(),
+            pin: PairingPin::new("123456").expect("valid pin"),
+        }
+    }
 
     #[test]
     fn pairing_pin_accepts_six_digits() {
@@ -63,19 +115,29 @@ mod tests {
         assert_eq!(PairingPin::new("1234567"), Err(PairingError::InvalidPin));
         assert_eq!(PairingPin::new("12a456"), Err(PairingError::InvalidPin));
     }
-}
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PairingStatusResponse {
-    pub status: PairingStatus,
-    pub offer: Option<PairingOffer>,
-    pub paired_host_name: Option<String>,
-    pub message: Option<String>,
-}
+    #[test]
+    fn qr_payload_is_derived_from_offer() {
+        let offer = test_offer();
+        let payload = PairingQrPayload::from_offer(&offer);
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PairingStatus {
-    Unavailable,
-    WaitingForHost,
-    Paired,
+        assert_eq!(payload.schema_version, PAIRING_QR_PAYLOAD_VERSION);
+        assert_eq!(payload.node_uuid, offer.node_uuid);
+        assert_eq!(payload.node_name, offer.node_name);
+        assert_eq!(
+            payload.certificate_fingerprint,
+            offer.certificate_fingerprint
+        );
+        assert_eq!(payload.pin, offer.pin);
+    }
+
+    #[test]
+    fn qr_payload_serializes_to_json() {
+        let payload = PairingQrPayload::from_offer(&test_offer());
+        let json = payload.to_json().expect("serialize qr payload");
+
+        assert!(json.contains("schema_version"));
+        assert!(json.contains("00000000-0000-4000-8000-000000000004"));
+        assert!(json.contains("sha256:fingerprint"));
+    }
 }

@@ -1,5 +1,6 @@
 use sw_core::{
-    PairingOffer, PairingPin, PairingRequest, PairingResponse, PairingStatus, PairingStatusResponse,
+    PairingOffer, PairingPin, PairingQrPayload, PairingRequest, PairingResponse, PairingStatus,
+    PairingStatusResponse,
 };
 
 #[derive(Debug, Clone)]
@@ -19,18 +20,21 @@ impl PairingState {
             Self::Unavailable { reason } => PairingStatusResponse {
                 status: PairingStatus::Unavailable,
                 offer: None,
+                qr_payload: None,
                 paired_host_name: None,
                 message: Some(reason.clone()),
             },
             Self::Waiting { offer } => PairingStatusResponse {
                 status: PairingStatus::WaitingForHost,
                 offer: Some(offer.clone()),
+                qr_payload: Some(PairingQrPayload::from_offer(offer)),
                 paired_host_name: None,
                 message: None,
             },
             Self::Paired { host_name } => PairingStatusResponse {
                 status: PairingStatus::Paired,
                 offer: None,
+                qr_payload: None,
                 paired_host_name: Some(host_name.clone()),
                 message: None,
             },
@@ -145,6 +149,7 @@ mod tests {
 
         assert_eq!(status.status, PairingStatus::WaitingForHost);
         assert!(status.offer.is_some());
+        assert!(status.qr_payload.is_some());
     }
 
     #[test]
