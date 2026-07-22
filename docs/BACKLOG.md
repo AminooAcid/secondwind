@@ -5,6 +5,36 @@ why it waits and what unblocks it. The plan's rule stands: build in phase
 order, small steps, working state — and right now the gate is the first
 hardware validation (`docs/HARDWARE-VALIDATION.md`).
 
+## Moonlight ↔ Apollo pairing handshake (THE remaining v0.1 gap)
+
+The whole screen chain works on hardware except the final pairing. Fix the
+direction of the stream-pairing PIN:
+
+- **Current (broken):** companion arms a PIN on Apollo (`/api/pin`), passes
+  it to the node, `sw-kiosk` runs `moonlight pair <host> --pin <armed>`.
+  moonlight-qt 6.1 ignores this and generates its *own* PIN, so pairing
+  never completes and the stream is refused.
+- **Fix option A (match Moonlight's real flow):** `sw-kiosk` runs
+  `moonlight pair <host>` (no `--pin`), captures the PIN Moonlight prints,
+  returns it to the host (agent → companion), and the companion POSTs it to
+  Apollo `/api/pin`. Needs: reliable capture of Moonlight's PIN from its
+  output (verify it prints to stdout/stderr in the kiosk's Wayland session,
+  not just the GUI), plus a small agent route to report the PIN.
+- **Fix option B:** confirm whether a specific moonlight-qt flag/version
+  does predetermined-PIN pairing; if so, pin that Moonlight build.
+- **Single credential owner:** Apollo's dashboard credentials must be owned
+  *only* by the companion (stored in `apollo-credentials.json`), never set
+  manually — the manual `--creds` we ran for debugging thrashed against the
+  companion's and caused repeated 401s. Consider the companion refusing to
+  proceed if Apollo's creds don't match its stored copy, and re-registering
+  cleanly (service stopped) when they drift.
+- **Once paired,** `stream_paired` is set per node and future connects skip
+  pairing — so this only bites the first connect.
+
+Test rig for next session: node reachable, Apollo healthy on 47990
+(`encoder=software`, `address_family=ipv4`), then `--screen-on` and watch
+the node kiosk run Moonlight; capture the PIN it shows and complete pairing.
+
 ## Apollo control layer — gentler, less destabilising (from first hardware run)
 
 The screen-connect path drove Apollo 0.4.7-alpha into a wedged state on the

@@ -44,13 +44,38 @@ hardened against (each committed):
 - New credentials 401 until the service restarts (config/creds read at boot).
 - Only restart on a confirmed 401, never on a slow-but-healthy API.
 
-After the churn, Apollo wedged: web UI stopped binding 47990 **even after a
-full clean restart and after removing all SecondWind config/creds** — the
-log shows repeated NVENC encoder attempts and `NV_ENC_ERR_DEVICE_NOT_EXIST`,
-i.e. a stuck GPU/encoder/session state in the alpha build, independent of
-SecondWind. **Resolution: a host reboot clears it (Apollo bound 47990 fine
-at session start).** Retry the streaming leg after a reboot, with the
-gentler Apollo handling noted in the backlog.
+After the churn, Apollo's web UI (47990) stopped binding. **Root-caused
+(confirmed against Apollo `src/main.cpp`): startup runs `probe_encoders()`
+→ `http::init()` → `confighttp::start()`, so the web UI binds *after* the
+encoder self-test. On this Optimus/Max-Q laptop the NVENC probe hangs
+(`NV_ENC_ERR_DEVICE_NOT_EXIST` — the dGPU powers down when idle), so the
+service reports RUNNING but 47990 never binds.** Two things fixed it,
+both now in the code:
+
+1. **Force a reliable host encoder** (`encoder = software`, or quicksync)
+   so the probe can't hang — `SECONDWIND_APOLLO_ENCODER` +
+   `managed_config_entries`.
+2. **`address_family = ipv4`** so the dashboard binds 127.0.0.1 (the
+   companion now talks to 127.0.0.1, not `localhost`→::1). Sunshine #2793.
+
+Plus: pin `port = 47989`; set credentials only with the service stopped;
+and a one-time reset of `sunshine_state.json` cleared credential state
+mangled by earlier `--creds` races. **With these, Apollo served 47990 and
+the full companion→Apollo→node→Moonlight chain ran: Apollo configured, PIN
+armed, node told to connect, and the node's Moonlight reached Apollo and
+requested pairing.**
+
+### The one remaining gap: Moonlight ↔ Apollo pairing handshake
+
+The node's Moonlight connects to Apollo but **pairing does not complete**,
+so the stream is refused ("computer SecondWind has not been paired"). Our
+design arms a PIN on Apollo (`/api/pin`) and runs
+`moonlight pair <host> --pin <armed>`, assuming Moonlight uses the armed
+PIN. On moonlight-qt 6.1 (Flatpak) that assumption is wrong — Moonlight
+generates *its own* PIN. Manual completion over SSH is not viable
+(headless `moonlight pair` prints nothing; the node kiosk has no
+interactive GUI). **This is the last integration gap and needs the code
+fix in the backlog. Everything up to it is validated on hardware.**
 - [ ] Moonlight CLI flags match the shipped client (Flatpak Moonlight 6.1 via the `moonlight` wrapper — verify `pair`/`stream` args).
 - [ ] Auto-connect across cable replug and across the USB-hub Ethernet adapter disappearing.
 - [~] Node idle RAM under ~400 MB. **Currently ~530 (screen-only) to ~640 MB (all services). Debian 13 session stack + always-on xpra; Docker now socket-activated, bloat masked. Reaching target needs lazy-start xpra + session-daemon trim (backlog).**
