@@ -11,21 +11,27 @@ steps A–B), then `scripts/node/install-node.sh` run per
 `docs/NODE-SETUP.md`; companion running on the host. (The ISO path in
 `node-image/` is the 1.0 alternative — see BACKLOG.)
 
+> **First hardware run: 2026-07-22, MSI Haswell node + Debian 13 (trixie).
+> v0.1 core PASSED; findings folded back into the code. See
+> `docs/COMPATIBILITY.md` for the per-fix list.**
+
 ## v0.0 — Install path itself
 
-- [ ] `install-node.sh` completes on a fresh Debian minimal install
-      (packages, Moonlight repo, `node-rolling` binaries download).
-- [ ] Re-running it updates cleanly and keeps `/etc/secondwind/` edits.
+- [x] `install-node.sh` completes on a fresh Debian minimal install
+      (packages, Moonlight repo, binaries). ✅ from public GitHub, exit 0.
+- [x] Re-running it updates cleanly and keeps `/etc/secondwind/` edits. ✅
 
 ## v0.1 — Screen + pairing + auto-connect
 
-- [ ] After reboot the node reaches the SecondWind pairing screen (QR + PIN), no terminal.
-- [ ] Companion discovers the node; PIN pairs; kiosk flips to the idle screen.
-- [ ] Apollo layer: managed config block accepted by the installed Apollo version; credentials + PIN arming work against its localhost API (`companion/src-tauri/src/apollo.rs` holds the keys/endpoints to adjust).
-- [ ] Screen toggle: virtual display appears matching the node panel; windows reflow on disconnect.
-- [ ] Moonlight CLI flags (`pair --pin`, `stream --quit-after`) match the shipped moonlight-qt (adjust `sw-kiosk/src/supervise.rs`).
+- [x] After reboot the node reaches the SecondWind pairing screen (QR + PIN), no terminal. ✅ (GRUB defaulted to the node entry)
+- [x] Companion discovers the node; PIN pairs; kiosk flips to the idle screen. ✅ (mDNS over real network; kiosk showed paired-idle ambient screen)
+- [x] mTLS enforced after pairing; a no-client-cert connection is rejected. ✅
+- [x] H.264 hardware decode detected (HD 4600). ✅ (`screen: ok` in `/v1/health`)
+- [ ] Apollo layer: managed config block accepted by the installed Apollo version; credentials + PIN arming work against its localhost API. **Apollo present (0.x, `ApolloService`); service-name bug fixed. Config/PIN arming not yet driven.**
+- [ ] Screen toggle: virtual display appears matching the node panel; windows reflow on disconnect. **Not yet driven — needs Apollo running + release companion + eyes on host monitors.**
+- [ ] Moonlight CLI flags match the shipped client (Flatpak Moonlight 6.1 via the `moonlight` wrapper — verify `pair`/`stream` args).
 - [ ] Auto-connect across cable replug and across the USB-hub Ethernet adapter disappearing.
-- [ ] Node idle RAM under ~400 MB.
+- [~] Node idle RAM under ~400 MB. **Currently ~530 (screen-only) to ~640 MB (all services). Debian 13 session stack + always-on xpra; Docker now socket-activated, bloat masked. Reaching target needs lazy-start xpra + session-daemon trim (backlog).**
 
 ## v0.2 — Disk
 

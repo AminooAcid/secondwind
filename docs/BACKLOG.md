@@ -5,6 +5,23 @@ why it waits and what unblocks it. The plan's rule stands: build in phase
 order, small steps, working state — and right now the gate is the first
 hardware validation (`docs/HARDWARE-VALIDATION.md`).
 
+## Idle-RAM reduction (from first hardware run)
+
+The MSI Haswell node idles at ~530 MB (Screen-only) to ~640 MB (all
+services) on Debian 13 — over the plan's ~400 MB goal. Everything works;
+this is footprint polish. Two fixes, in impact order:
+
+- **Lazy-start the xpra Apps session** (~147 MB: xpra + Xvfb). Like Docker
+  is now socket-activated, the agent should start `sw-xpra` on the first
+  app launch and stop it when idle, instead of it running always-on. Apps
+  is not an "always-on" feature — only Screen/Disk/USB are.
+- **Trim the `cage` session's inherited daemons**: pipewire/wireplumber
+  (no audio passthrough yet), ibus (no input method on a kiosk),
+  xdg-desktop-portal, cups. Some respawn with the session; mask at the
+  systemd level or start `cage` in a minimal environment.
+- If still over after both, revise the ~400 MB target in the plan to match
+  the real modern-Debian floor and record why.
+
 ## After hardware validation
 
 - **ISO package parity with trixie findings**: the image config still
