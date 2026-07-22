@@ -139,10 +139,13 @@ fn write_config(config_file: &Path, config: &SecondWindConfig) -> Result<(), Hos
 
     let contents = serde_json::to_string_pretty(config)
         .map_err(|source| HostStateError::Serialize { source })?;
-    fs::write(config_file, contents).map_err(|source| HostStateError::Write {
-        path: config_file.to_path_buf(),
-        source,
-    })
+    // Atomic so a crash mid-save never corrupts node trust.
+    sw_core::certificates::write_atomic(config_file, contents.as_bytes(), false).map_err(
+        |_| HostStateError::Write {
+            path: config_file.to_path_buf(),
+            source: io::Error::other("atomic write failed"),
+        },
+    )
 }
 
 /// Detected host display name; never hardcoded. Falls back to a product

@@ -115,17 +115,41 @@ fn write_certificate_files(
 ) -> Result<(), CertificateStoreError> {
     create_parent(certificate_file)?;
     create_parent(private_key_file)?;
-    fs::write(certificate_file, &certificate.certificate_pem).map_err(|source| {
-        CertificateStoreError::Write {
-            path: certificate_file.to_path_buf(),
-            source,
-        }
+    write_atomic(certificate_file, certificate.certificate_pem.as_bytes(), false)?;
+    // The private key is owner-only.
+    write_atomic(private_key_file, certificate.private_key_pem.as_bytes(), true)
+}
+
+/// Atomic write (temp file in the same directory + rename) so a crash never
+/// leaves a half-written file. `restrict` makes the file owner-only before
+/// it reaches its final name (Unix; Windows relies on profile ACLs).
+pub fn write_atomic(
+    path: &Path,
+    contents: &[u8],
+    restrict: bool,
+) -> Result<(), CertificateStoreError> {
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let temp_path = path.with_file_name(format!("{file_name}.tmp"));
+
+    fs::write(&temp_path, contents).map_err(|source| CertificateStoreError::Write {
+        path: temp_path.clone(),
+        source,
     })?;
-    fs::write(private_key_file, &certificate.private_key_pem).map_err(|source| {
-        CertificateStoreError::Write {
-            path: private_key_file.to_path_buf(),
-            source,
-        }
+
+    #[cfg(unix)]
+    if restrict {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    let _ = restrict;
+
+    fs::rename(&temp_path, path).map_err(|source| CertificateStoreError::Write {
+        path: path.to_path_buf(),
+        source,
     })
 }
 

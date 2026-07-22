@@ -72,13 +72,12 @@ fn run(config: &KioskRuntimeConfig) -> std::io::Result<()> {
                 pair_first,
             } => {
                 // Reap a finished client, count the failure for backoff.
-                if let Some(child) = client.as_mut() {
-                    if child.try_wait()?.is_some() {
+                if let Some(child) = client.as_mut()
+                    && child.try_wait()?.is_some() {
                         client = None;
                         supervisor.record_failure();
                         last_failure_at = Some(Instant::now());
                     }
-                }
 
                 let backoff_over = last_failure_at
                     .map(|at| at.elapsed() >= supervisor.restart_backoff())
@@ -123,12 +122,11 @@ fn run(config: &KioskRuntimeConfig) -> std::io::Result<()> {
 
         // Development escape hatch only; disabled in the product image.
         if config.allow_exit_key && event::poll(config.poll_interval)? {
-            if let event::Event::Key(key) = event::read()? {
-                if key.code == event::KeyCode::Char('q') {
+            if let event::Event::Key(key) = event::read()?
+                && key.code == event::KeyCode::Char('q') {
                     stop_client(&mut client);
                     break;
                 }
-            }
         } else if !config.allow_exit_key {
             std::thread::sleep(config.poll_interval);
         }

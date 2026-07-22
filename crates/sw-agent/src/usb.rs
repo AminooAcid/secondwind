@@ -66,11 +66,10 @@ pub fn parse_usbip_list(output: &str, bound: &[String]) -> Vec<UsbDeviceInfo> {
                 product_id: product_id.to_string(),
                 description: String::new(),
             });
-        } else if let Some(device) = current.as_mut() {
-            if !trimmed.is_empty() && device.description.is_empty() {
+        } else if let Some(device) = current.as_mut()
+            && !trimmed.is_empty() && device.description.is_empty() {
                 device.description = trimmed.to_string();
             }
-        }
     }
     if let Some(device) = current.take() {
         devices.push(device);

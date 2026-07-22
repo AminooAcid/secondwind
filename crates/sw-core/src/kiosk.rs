@@ -78,7 +78,14 @@ pub fn write_kiosk_state(
         serde_json::to_string_pretty(state).map_err(|source| KioskStateError::Serialize {
             source,
         })?;
-    let temp_path = path.with_extension("tmp");
+    // Append ".tmp" (never replace the extension) so the temp name can't
+    // collide with a sibling file, and stay in the same directory so the
+    // rename is atomic.
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let temp_path = path.with_file_name(format!("{file_name}.tmp"));
     fs::write(&temp_path, contents).map_err(|source| KioskStateError::Write {
         path: temp_path.clone(),
         source,
@@ -143,7 +150,13 @@ mod tests {
     impl Drop for TempStateFile {
         fn drop(&mut self) {
             let _ = fs::remove_file(&self.path);
-            let _ = fs::remove_file(self.path.with_extension("tmp"));
+            let _ = fs::remove_file(
+                self.path
+                    .with_file_name(format!(
+                        "{}.tmp",
+                        self.path.file_name().expect("name").to_string_lossy()
+                    )),
+            );
         }
     }
 
@@ -196,6 +209,10 @@ mod tests {
 
         let loaded = read_kiosk_state(&file.path).expect("read state");
         assert!(matches!(loaded, KioskState::Streaming { .. }));
-        assert!(!file.path.with_extension("tmp").exists());
+        let temp = file.path.with_file_name(format!(
+            "{}.tmp",
+            file.path.file_name().expect("name").to_string_lossy()
+        ));
+        assert!(!temp.exists());
     }
 }

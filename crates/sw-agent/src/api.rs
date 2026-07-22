@@ -52,6 +52,8 @@ pub struct AgentState {
     pub usb: Option<SharedUsbController>,
     /// v0.5 job offload; None when the image has no Docker/presets.
     pub jobs: Option<SharedJobsController>,
+    /// Wrong-PIN counter; the pairing offer is invalidated at the limit.
+    pub failed_pin_attempts: Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl AgentState {
@@ -89,6 +91,7 @@ impl AgentState {
             share: None,
             usb: None,
             jobs: None,
+            failed_pin_attempts: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         }
     }
 
@@ -347,19 +350,40 @@ pub fn pairing_status_response(state: &AgentState) -> PairingStatusResponse {
         .status_response()
 }
 
+/// Maximum wrong-PIN attempts before the offer is invalidated (the 6-digit
+/// space must not be brute-forceable over the LAN).
+const MAX_PIN_ATTEMPTS: u32 = 5;
+
 pub fn submit_pairing_request(state: &AgentState, request: PairingRequest) -> PairingResponse {
-    let result = state
+    // One write lock across validate → persist → mark: two concurrent
+    // submissions can never both pass validation (BUG-001).
+    let mut pairing = state
         .pairing
-        .read()
-        .expect("pairing state lock should not be poisoned")
-        .prepare_submit_request(request);
+        .write()
+        .expect("pairing state lock should not be poisoned");
+    let result = pairing.prepare_submit_request(request);
 
     let Some(paired_host) = result.paired_host else {
+        // Count failed attempts only while an offer is actually waiting.
+        if matches!(&*pairing, PairingState::Waiting { .. }) {
+            let attempts = state
+                .failed_pin_attempts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1;
+            if attempts >= MAX_PIN_ATTEMPTS {
+                *pairing = PairingState::Unavailable {
+                    reason: "Too many incorrect PIN attempts. Restart the node to pair."
+                        .to_string(),
+                };
+                drop(pairing);
+                state.sync_kiosk();
+            }
+        }
         return result.response;
     };
 
-    if let Some(identity_store) = &state.identity_store {
-        if identity_store
+    if let Some(identity_store) = &state.identity_store
+        && identity_store
             .persist_paired_host(paired_host.clone())
             .is_err()
         {
@@ -368,13 +392,9 @@ pub fn submit_pairing_request(state: &AgentState, request: PairingRequest) -> Pa
                 node_certificate_fingerprint: result.response.node_certificate_fingerprint,
             };
         }
-    }
 
-    state
-        .pairing
-        .write()
-        .expect("pairing state lock should not be poisoned")
-        .mark_paired(paired_host.host_name);
+    pairing.mark_paired(paired_host.host_name);
+    drop(pairing);
     state.sync_kiosk();
 
     result.response
@@ -828,6 +848,7 @@ mod tests {
             share: None,
             usb: None,
             jobs: None,
+            failed_pin_attempts: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         }
     }
 
@@ -892,6 +913,41 @@ mod tests {
     fn pairing_status_reports_unavailable_by_default() {
         let state = test_state(Vec::new());
 
+        assert_eq!(
+            pairing_status_response(&state).status,
+            PairingStatus::Unavailable
+        );
+    }
+
+    #[test]
+    fn repeated_wrong_pins_invalidate_the_offer() {
+        let state = test_state(Vec::new());
+        *state.pairing.write().expect("lock") = waiting_pairing_state();
+
+        for _ in 0..5 {
+            let response = submit_pairing_request(
+                &state,
+                PairingRequest {
+                    host_name: "host".to_string(),
+                    host_certificate_fingerprint: "host-fingerprint".to_string(),
+                    host_certificate_pem: "host certificate".to_string(),
+                    pin: PairingPin::new("000000").expect("valid pin"),
+                },
+            );
+            assert!(!response.accepted);
+        }
+
+        // Offer is gone: even the correct PIN is now rejected.
+        let after_lockout = submit_pairing_request(
+            &state,
+            PairingRequest {
+                host_name: "host".to_string(),
+                host_certificate_fingerprint: "host-fingerprint".to_string(),
+                host_certificate_pem: "host certificate".to_string(),
+                pin: PairingPin::new("123456").expect("valid pin"),
+            },
+        );
+        assert!(!after_lockout.accepted);
         assert_eq!(
             pairing_status_response(&state).status,
             PairingStatus::Unavailable

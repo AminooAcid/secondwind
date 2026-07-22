@@ -85,10 +85,13 @@ pub fn write_identity(
 
     let contents = serde_json::to_string_pretty(identity)
         .map_err(|source| IdentityStoreError::Serialize { source })?;
-    fs::write(state_file, contents).map_err(|source| IdentityStoreError::Write {
-        path: state_file.to_path_buf(),
-        source,
-    })
+    // Atomic + owner-only: identity carries the paired host trust.
+    sw_core::certificates::write_atomic(state_file, contents.as_bytes(), true).map_err(
+        |_| IdentityStoreError::Write {
+            path: state_file.to_path_buf(),
+            source: io::Error::other("atomic write failed"),
+        },
+    )
 }
 
 #[derive(Debug)]

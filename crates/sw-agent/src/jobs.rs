@@ -239,8 +239,8 @@ impl JobsController for DockerJobsController {
     fn jobs(&self) -> Vec<JobInfo> {
         let mut jobs = self.jobs.lock().expect("jobs lock");
         for job in jobs.values_mut() {
-            if let Some(child) = job.child.as_mut() {
-                if let Ok(Some(status)) = child.try_wait() {
+            if let Some(child) = job.child.as_mut()
+                && let Ok(Some(status)) = child.try_wait() {
                     job.state = if status.success() {
                         JobState::Succeeded
                     } else {
@@ -248,7 +248,6 @@ impl JobsController for DockerJobsController {
                     };
                     job.child = None;
                 }
-            }
         }
         jobs.iter()
             .map(|(job_id, job)| JobInfo {
