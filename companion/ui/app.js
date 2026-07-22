@@ -1,6 +1,11 @@
 const state = {
   nodes: [],
   selectedNodeUuid: null,
+  // node_uuid -> { display_name, node_certificate_fingerprint, screen_always_on }
+  paired: new Map(),
+  // node_uuid -> true while the screen is on
+  screenOn: new Map(),
+  busy: false,
 };
 
 const elements = {
@@ -14,22 +19,32 @@ const elements = {
   hostName: document.querySelector("#hostName"),
   apiVersion: document.querySelector("#apiVersion"),
   fingerprint: document.querySelector("#fingerprint"),
+  pairForm: document.querySelector("#pairForm"),
+  pinInput: document.querySelector("#pinInput"),
   pairNode: document.querySelector("#pairNode"),
   screenToggle: document.querySelector("#screenToggle"),
   statusLine: document.querySelector("#statusLine"),
 };
 
-function tauriInvoke(command) {
+function tauriInvoke(command, args) {
   const invoke = window.__TAURI__?.core?.invoke;
   if (!invoke) {
-    return Promise.resolve([]);
+    return Promise.reject(new Error("SecondWind is still starting."));
   }
 
-  return invoke(command);
+  return invoke(command, args);
 }
 
 function selectedNode() {
   return state.nodes.find((node) => node.node_uuid === state.selectedNodeUuid) ?? null;
+}
+
+function isPaired(nodeUuid) {
+  return state.paired.has(nodeUuid);
+}
+
+function setStatus(message) {
+  elements.statusLine.textContent = message;
 }
 
 function renderNodes() {
@@ -57,7 +72,11 @@ function renderNodes() {
 
     const subtitle = document.createElement("span");
     subtitle.className = "node-subtitle";
-    subtitle.textContent = `${node.host_name}:${node.api_port}`;
+    subtitle.textContent = isPaired(node.node_uuid)
+      ? state.screenOn.get(node.node_uuid)
+        ? "Paired · screen on"
+        : "Paired"
+      : "Not paired yet";
 
     item.append(title, subtitle);
     item.addEventListener("click", () => {
@@ -72,16 +91,21 @@ function renderNodes() {
 function renderDetail() {
   const node = selectedNode();
   const hasNode = Boolean(node);
+  const paired = hasNode && isPaired(node.node_uuid);
+  const screenOn = hasNode && Boolean(state.screenOn.get(node.node_uuid));
 
   elements.detailSubtitle.textContent = hasNode ? node.node_uuid : "No node selected";
-  elements.pairingState.textContent = hasNode ? "Ready" : "Unpaired";
-  elements.pairingState.classList.toggle("muted", !hasNode);
+  elements.pairingState.textContent = !hasNode ? "—" : paired ? "Paired" : "Waiting to pair";
+  elements.pairingState.classList.toggle("muted", !paired);
   elements.nodeName.textContent = node?.node_name ?? "-";
   elements.hostName.textContent = node?.host_name ?? "-";
   elements.apiVersion.textContent = node?.api_version ?? "-";
   elements.fingerprint.textContent = node?.node_certificate_fingerprint ?? "-";
-  elements.pairNode.disabled = true;
-  elements.screenToggle.disabled = true;
+
+  elements.pairForm.hidden = !hasNode || paired;
+  elements.pairNode.disabled = !hasNode || paired || state.busy;
+  elements.screenToggle.disabled = !paired || state.busy;
+  elements.screenToggle.textContent = screenOn ? "Turn Screen Off" : "Turn Screen On";
 }
 
 function render() {
@@ -89,10 +113,19 @@ function render() {
   renderDetail();
 }
 
+async function refreshPaired() {
+  try {
+    const paired = await tauriInvoke("paired_nodes");
+    state.paired = new Map(paired.map((node) => [node.node_uuid, node]));
+  } catch (error) {
+    // Paired list is best-effort at startup; discovery errors surface below.
+  }
+}
+
 async function refreshNodes() {
   elements.refreshNodes.disabled = true;
   elements.scanState.textContent = "Scanning";
-  elements.statusLine.textContent = "Scanning for SecondWind nodes";
+  setStatus("Scanning for SecondWind nodes");
 
   try {
     const nodes = await tauriInvoke("discover_nodes");
@@ -102,9 +135,9 @@ async function refreshNodes() {
       state.selectedNodeUuid = state.nodes[0]?.node_uuid ?? null;
     }
 
-    elements.statusLine.textContent = state.nodes.length === 0 ? "No nodes found" : "Nodes updated";
+    setStatus(state.nodes.length === 0 ? "No nodes found" : "Nodes updated");
   } catch (error) {
-    elements.statusLine.textContent = String(error);
+    setStatus(String(error));
   } finally {
     elements.scanState.textContent = "Idle";
     elements.refreshNodes.disabled = false;
@@ -112,6 +145,69 @@ async function refreshNodes() {
   }
 }
 
+async function pairSelectedNode() {
+  const node = selectedNode();
+  if (!node || state.busy) {
+    return;
+  }
+
+  state.busy = true;
+  render();
+  setStatus(`Pairing with ${node.node_name}…`);
+
+  try {
+    const summary = await tauriInvoke("pair_node", {
+      node,
+      pin: elements.pinInput.value,
+    });
+    state.paired.set(summary.node_uuid, summary);
+    elements.pinInput.value = "";
+    setStatus(`Paired with ${summary.display_name}.`);
+  } catch (error) {
+    setStatus(String(error));
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+async function toggleScreen() {
+  const node = selectedNode();
+  if (!node || !isPaired(node.node_uuid) || state.busy) {
+    return;
+  }
+
+  const turningOn = !state.screenOn.get(node.node_uuid);
+  state.busy = true;
+  render();
+  setStatus(turningOn ? "Turning the screen on…" : "Turning the screen off…");
+
+  try {
+    const result = await tauriInvoke("set_screen", { node, enabled: turningOn });
+    state.screenOn.set(node.node_uuid, result.streaming);
+    if (result.streaming) {
+      setStatus(`${node.node_name} is now an extra screen.`);
+    } else if (turningOn) {
+      setStatus(result.message ?? "The node could not start the screen.");
+    } else {
+      setStatus("Screen turned off.");
+    }
+  } catch (error) {
+    setStatus(String(error));
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
 elements.refreshNodes.addEventListener("click", refreshNodes);
+elements.pairNode.addEventListener("click", pairSelectedNode);
+elements.pinInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    pairSelectedNode();
+  }
+});
+elements.screenToggle.addEventListener("click", toggleScreen);
+
 render();
-refreshNodes();
+refreshPaired().then(refreshNodes);

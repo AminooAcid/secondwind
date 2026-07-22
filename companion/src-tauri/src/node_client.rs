@@ -15,7 +15,9 @@ use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime},
 };
 use sw_core::{
-    CertificateMaterial, PairingRequest, PairingResponse, agent_api::PAIRING_PATH,
+    CertificateMaterial, PairingRequest, PairingResponse, ScreenCommandRequest,
+    ScreenStatusResponse,
+    agent_api::{PAIRING_PATH, SCREEN_PATH},
     certificate_der_from_pem, fingerprint_of_der,
 };
 
@@ -225,6 +227,16 @@ pub fn get_json<Response: serde::de::DeserializeOwned>(
     }
 
     Err(last_error)
+}
+
+/// Sends a screen command to a paired node over mTLS (host identity
+/// required by the node after pairing).
+pub fn post_screen_command(
+    endpoint: &NodeEndpoint,
+    client_identity: Option<&CertificateMaterial>,
+    request: &ScreenCommandRequest,
+) -> Result<ScreenStatusResponse, NodeClientError> {
+    post_json(endpoint, client_identity, SCREEN_PATH, request)
 }
 
 /// Submits the pairing request to the node. The connection is pinned to the

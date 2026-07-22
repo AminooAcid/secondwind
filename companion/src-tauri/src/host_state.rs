@@ -87,6 +87,7 @@ impl HostState {
                 screen: ScreenConfig {
                     always_on: true,
                     preferred_panel_mode: None,
+                    stream_paired: false,
                 },
             },
         );
@@ -95,6 +96,17 @@ impl HostState {
 
     pub fn paired_node(&self, node_uuid: &NodeUuid) -> Option<&NodeConfig> {
         self.config.nodes.get(node_uuid)
+    }
+
+    /// Marks the node's streaming client as paired with the host's streaming
+    /// server, so future connects skip the one-shot stream PIN.
+    pub fn mark_stream_paired(&mut self, node_uuid: &NodeUuid) -> Result<(), HostStateError> {
+        if let Some(node) = self.config.nodes.get_mut(node_uuid) {
+            node.screen.stream_paired = true;
+            self.save()?;
+        }
+
+        Ok(())
     }
 }
 

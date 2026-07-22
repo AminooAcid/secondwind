@@ -9,6 +9,8 @@ repository = "https://github.com/AminooAcid/secondwind"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+base64 = "0.22"
+getrandom = "0.2"
 mdns-sd = "0.20"
 rustls = "0.23"
 rustls-pemfile = "2"

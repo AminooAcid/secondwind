@@ -77,6 +77,11 @@ pub struct NodeTrust {
 pub struct ScreenConfig {
     pub always_on: bool,
     pub preferred_panel_mode: Option<PanelMode>,
+    /// Whether the node's streaming client has already completed its own
+    /// one-time pairing with the host's streaming server. Defaults false so
+    /// existing configs migrate forward.
+    #[serde(default)]
+    pub stream_paired: bool,
 }
 
 #[cfg(test)]
@@ -104,6 +109,7 @@ mod tests {
                         height_px: 1,
                         refresh_millihz: 1,
                     }),
+                    stream_paired: false,
                 },
             },
         );

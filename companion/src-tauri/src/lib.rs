@@ -1,6 +1,8 @@
+pub mod apollo;
 pub mod discovery;
 pub mod host_state;
 pub mod node_client;
+pub mod screen_control;
 
 pub fn run() {
     tauri::Builder::default()
@@ -8,6 +10,7 @@ pub fn run() {
             commands::discover_nodes,
             commands::pair_node,
             commands::paired_nodes,
+            commands::set_screen,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SecondWind companion");
@@ -24,6 +27,7 @@ mod commands {
         discovery::{self, DiscoveredNode},
         host_state::HostState,
         node_client::{self, NodeEndpoint},
+        screen_control,
     };
 
     const DISCOVERY_BROWSE_WINDOW_MS: u64 = 900;
@@ -121,6 +125,42 @@ mod commands {
             display_name: node.node_name,
             node_certificate_fingerprint: node.node_certificate_fingerprint,
             screen_always_on: true,
+        })
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    pub struct ScreenToggleResult {
+        pub streaming: bool,
+        pub message: Option<String>,
+    }
+
+    #[tauri::command]
+    pub fn set_screen(
+        app: tauri::AppHandle,
+        node: DiscoveredNode,
+        enabled: bool,
+    ) -> Result<ScreenToggleResult, String> {
+        let state_root = state_root(&app)?;
+        let mut state = load_host_state(&app)?;
+        let endpoint = screen_control::paired_endpoint(
+            &state,
+            &node.node_uuid,
+            node.addresses.clone(),
+            node.api_port,
+        )
+        .map_err(|error| error.to_string())?;
+
+        let response = if enabled {
+            screen_control::connect_screen(&mut state, &state_root, &node.node_uuid, &endpoint)
+                .map_err(|error| error.to_string())?
+        } else {
+            screen_control::disconnect_screen(&state, &endpoint)
+                .map_err(|error| error.to_string())?
+        };
+
+        Ok(ScreenToggleResult {
+            streaming: matches!(response.screen, sw_core::ScreenState::Streaming { .. }),
+            message: response.message,
         })
     }
 

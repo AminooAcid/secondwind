@@ -194,6 +194,46 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.pair-form {
+  border: 1px solid #dce2dd;
+  border-radius: 8px;
+  background: #f9faf7;
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+  padding: 14px;
+}
+
+.pair-form label {
+  color: #61706a;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.pair-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pair-row input {
+  border: 1px solid #cbd4ce;
+  border-radius: 8px;
+  flex: 1 1 140px;
+  font: inherit;
+  font-size: 1.1rem;
+  letter-spacing: 0.35em;
+  min-height: 42px;
+  min-width: 0;
+  padding: 0 12px;
+}
+
+.pair-row input:focus {
+  border-color: #116b5c;
+  outline: 2px solid #b9ded5;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;

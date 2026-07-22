@@ -56,9 +56,23 @@
             </div>
           </dl>
 
+          <div id="pairForm" class="pair-form" hidden>
+            <label for="pinInput">PIN shown on the node's screen</label>
+            <div class="pair-row">
+              <input
+                id="pinInput"
+                type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                maxlength="6"
+                placeholder="6-digit PIN"
+              >
+              <button id="pairNode" type="button" disabled>Pair</button>
+            </div>
+          </div>
+
           <div class="actions">
-            <button id="pairNode" type="button" disabled>Pair</button>
-            <button id="screenToggle" type="button" disabled>Screen Off</button>
+            <button id="screenToggle" type="button" disabled>Turn Screen On</button>
           </div>
 
           <p id="statusLine" class="status-line" role="status">Ready</p>
