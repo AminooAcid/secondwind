@@ -7,6 +7,11 @@ hardware validation (`docs/HARDWARE-VALIDATION.md`).
 
 ## After hardware validation
 
+- **ISO package parity with trixie findings**: the image config still
+  assumes apt `moonlight-qt` (Moonlight's repo publishes nothing for
+  trixie → Flatpak path needed) and Debian-archived `xpra` (gone in
+  trixie → xpra.org repo needed). `install-node.sh` already handles both;
+  port the same logic into the live-build hooks before the ISO returns.
 - **Flashable all-in-one node ISO as the polished install path.** The
   live-build tree (`node-image/`) is complete and stays maintained; the
   primary path for now is the Git-based `install-node.sh` (owner

@@ -35,7 +35,9 @@ evince
 
 # Capability detection + hardware video decode. All three VA-API drivers are
 # installed; the right one is chosen at runtime per GPU generation.
-libva-utils
+# NOTE: on Debian 13+ this package is named `vainfo`; adjust per release
+# (hardware-validated finding, see install-node.sh for the dual-name logic).
+vainfo
 i965-va-driver
 intel-media-va-driver-non-free
 mesa-va-drivers

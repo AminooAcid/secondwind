@@ -83,15 +83,47 @@ else
 fi
 apt-get update -qq
 
-# Same set the image installs; VA driver picked at runtime, both installed.
+# xpra left Debian's own archive (gone in trixie); add xpra.org's official
+# repo when the current sources can't provide it.
+if ! apt-cache policy xpra 2>/dev/null | grep -q "Candidate: [0-9]"; then
+    say "    (adding the xpra.org package source)"
+    curl -fsSL https://xpra.org/xpra.asc -o /usr/share/keyrings/xpra.asc
+    printf 'deb [signed-by=/usr/share/keyrings/xpra.asc] https://xpra.org/ %s main\n' \
+        "$CODENAME" > /etc/apt/sources.list.d/secondwind-xpra.list
+    apt-get update -qq
+fi
+
+# Core set; VA driver picked at runtime, all candidates installed.
 apt-get install -y -qq \
-    cage foot moonlight-qt avahi-daemon \
-    libva-utils i965-va-driver mesa-va-drivers va-driver-all \
+    cage foot avahi-daemon \
+    i965-va-driver mesa-va-drivers va-driver-all \
     network-manager targetcli-fb xpra cifs-utils rsync usbip sudo docker.io \
     >/dev/null
+
+# Package renamed across releases: trixie ships `vainfo`, older `libva-utils`.
+apt-get install -y -qq vainfo >/dev/null 2>&1 \
+    || apt-get install -y -qq libva-utils >/dev/null
 apt-get install -y -qq intel-media-va-driver-non-free >/dev/null 2>&1 \
     || apt-get install -y -qq intel-media-va-driver >/dev/null 2>&1 \
     || true
+
+# Streaming client: apt package where the Moonlight repo publishes one for
+# this release; otherwise Flatpak plus a thin `moonlight` wrapper so the
+# kiosk invocation stays identical.
+if apt-cache policy moonlight-qt 2>/dev/null | grep -q "Candidate: [0-9]"; then
+    apt-get install -y -qq moonlight-qt >/dev/null
+else
+    say "    (moonlight-qt is not packaged for this release — using Flatpak)"
+    apt-get install -y -qq flatpak >/dev/null
+    flatpak remote-add --if-not-exists flathub \
+        https://dl.flathub.org/repo/flathub.flatpakrepo
+    flatpak install -y --noninteractive flathub com.moonlight_stream.Moonlight
+    cat > /usr/local/bin/moonlight <<'WRAP'
+#!/bin/sh
+exec flatpak run com.moonlight_stream.Moonlight "$@"
+WRAP
+    chmod 0755 /usr/local/bin/moonlight
+fi
 
 # ------------------------------------------------------------- binaries --
 say "4/7 installing SecondWind binaries"
