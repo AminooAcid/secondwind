@@ -15,9 +15,9 @@ use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime},
 };
 use sw_core::{
-    CertificateMaterial, PairingRequest, PairingResponse, ScreenCommandRequest,
-    ScreenStatusResponse,
-    agent_api::{PAIRING_PATH, SCREEN_PATH},
+    CertificateMaterial, DiskCommandRequest, DiskStatusResponse, PairingRequest, PairingResponse,
+    ScreenCommandRequest, ScreenStatusResponse,
+    agent_api::{DISK_PATH, PAIRING_PATH, SCREEN_PATH},
     certificate_der_from_pem, fingerprint_of_der,
 };
 
@@ -237,6 +237,22 @@ pub fn post_screen_command(
     request: &ScreenCommandRequest,
 ) -> Result<ScreenStatusResponse, NodeClientError> {
     post_json(endpoint, client_identity, SCREEN_PATH, request)
+}
+
+/// Sends a disk command to a paired node over mTLS.
+pub fn post_disk_command(
+    endpoint: &NodeEndpoint,
+    client_identity: Option<&CertificateMaterial>,
+    request: &DiskCommandRequest,
+) -> Result<DiskStatusResponse, NodeClientError> {
+    post_json(endpoint, client_identity, DISK_PATH, request)
+}
+
+pub fn get_disk_status(
+    endpoint: &NodeEndpoint,
+    client_identity: Option<&CertificateMaterial>,
+) -> Result<DiskStatusResponse, NodeClientError> {
+    get_json(endpoint, client_identity, DISK_PATH)
 }
 
 /// Submits the pairing request to the node. The connection is pinned to the

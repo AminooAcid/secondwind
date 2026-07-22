@@ -1,6 +1,7 @@
 pub mod apollo;
 pub mod auto_connect;
 pub mod discovery;
+pub mod disk_control;
 pub mod host_state;
 pub mod node_client;
 pub mod screen_control;
@@ -20,6 +21,7 @@ pub fn run() {
             commands::pair_node,
             commands::paired_nodes,
             commands::set_screen,
+            commands::set_disk,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SecondWind companion");
@@ -63,6 +65,7 @@ mod commands {
         auto_connect::ActiveScreens,
         commands_support::{load_host_state, state_root},
         discovery::{self, DiscoveredNode},
+        disk_control,
         host_state::HostState,
         node_client::{self, NodeEndpoint},
         screen_control,
@@ -193,6 +196,47 @@ mod commands {
             streaming,
             message: response.message,
         })
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    pub struct DiskToggleResult {
+        pub attached: bool,
+        pub drive_letter: Option<char>,
+        pub message: Option<String>,
+    }
+
+    #[tauri::command]
+    pub fn set_disk(
+        app: tauri::AppHandle,
+        node: DiscoveredNode,
+        enabled: bool,
+    ) -> Result<DiskToggleResult, String> {
+        let state = load_host_state(&app)?;
+        let endpoint = screen_control::paired_endpoint(
+            &state,
+            &node.node_uuid,
+            node.addresses.clone(),
+            node.api_port,
+        )
+        .map_err(|error| error.to_string())?;
+
+        if enabled {
+            let outcome = disk_control::connect_disk(&state, &node.node_uuid, &endpoint)
+                .map_err(|error| error.to_string())?;
+            Ok(DiskToggleResult {
+                attached: true,
+                drive_letter: outcome.drive_letter,
+                message: None,
+            })
+        } else {
+            disk_control::disconnect_disk(&state, &endpoint, None)
+                .map_err(|error| error.to_string())?;
+            Ok(DiskToggleResult {
+                attached: false,
+                drive_letter: None,
+                message: None,
+            })
+        }
     }
 
     #[cfg(test)]

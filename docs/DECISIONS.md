@@ -6,6 +6,14 @@ Format: newest first. Each entry has a date, the decision, the reasoning, and st
 
 ---
 
+## 2026-07-21 — v0.2 disk choices
+
+- **The exported LUN is CHAP-protected with node-generated credentials shared over mTLS.** iSCSI itself has no TLS; a bare LUN on the LAN would bypass the pairing trust model. CHAP secrets are random per node, generated at first boot, and only ever travel inside the paired `exposed` response. *Status: accepted.*
+- **The agent controls the export through a dedicated systemd unit + a polkit rule scoped to exactly that unit**, instead of running targetcli as root itself. Smallest privilege surface; the unit's env file (root-owned, group-readable by the agent) is the single description of what may be exported. *Status: accepted.*
+- **The data partition is created by the installer recipe with label `SECONDWIND_DATA` and formatted NTFS by the host on first attach.** The Windows initiator is the natural place to lay down the filesystem Windows will use; the first-attach script initializes only the disk belonging to the new iSCSI session. *Status: accepted; recipe behavior with "biggest free space" to verify on hardware.*
+- **Teardown order is disk-flush before anything else**, including on link loss (local initiator cleanup with the last-known IQN when the node is unreachable). *Status: accepted.*
+- **Windows-side attach/detach lives in two bundled PowerShell scripts** invoked by the companion (`scripts/windows/`), not in Rust P/Invoke — auditable, copy-paste debuggable, and matches the plan's "driven via PowerShell". *Status: accepted.*
+
 ## 2026-07-21 — v0.1 implementation choices
 
 Decisions made while completing the v0.1 feature set (companion pairing/screen, kiosk, auto-connect, image automation).

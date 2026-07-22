@@ -50,6 +50,16 @@ JSON over HTTPS, versioned under `/v1/`, mutual TLS after pairing. The agent bin
 | `/v1/pairing` | POST | pairing request: host name + host certificate + PIN |
 | `/v1/screen` | GET | screen state (`not_paired` / `idle` / `streaming`) |
 | `/v1/screen` | POST | `connect` (with optional one-shot stream PIN) / `disconnect`; the agent uses the requesting peer's address as the stream target |
+| `/v1/disk` | GET | disk state (`not_paired` / `unavailable` / `ready` / `exposed` + target) |
+| `/v1/disk` | POST | `enable` / `disable` the export of the designated data partition |
+
+## Disk (v0.2)
+
+- At install, the SecondWind partition recipe labels the node's data partition `SECONDWIND_DATA`. On first boot a provisioning unit generates `/etc/secondwind/disk.env`: device path, per-node IQN, and random CHAP credentials.
+- The agent starts/stops the `secondwind-disk` systemd unit (a polkit rule scopes the unprivileged agent to exactly that unit); the unit's script builds the LIO iSCSI target for the designated partition only, CHAP-authenticated.
+- The CHAP credentials travel exclusively inside the mTLS `exposed` response to the paired host — the block layer is protected by a secret only the paired host can learn.
+- The companion drives the Windows initiator through bundled PowerShell scripts: attach (with first-use GPT/NTFS initialization of the SecondWind disk only), drive-letter assignment from per-node config, and flush + detach.
+- Ordering: bring-up is screen → disk; teardown is disk (flush first) → screen. On link loss, the local initiator session is still flushed and cleaned using the last-known IQN.
 
 ## Capability Detection
 

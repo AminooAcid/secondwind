@@ -3,6 +3,20 @@
 All notable changes to SecondWind. Format loosely follows Keep a Changelog;
 versions are tagged only after their phase acceptance passes on hardware.
 
+## [Unreleased — v0.2 code-complete]
+
+### Added
+- Disk feature end-to-end: agent `GET`/`POST /v1/disk` (mTLS-gated), LIO
+  export unit + first-boot provisioning on the node (per-node IQN, random
+  CHAP secret, `SECONDWIND_DATA` partition from the installer recipe),
+  polkit rule scoping the agent to the export unit.
+- Windows attach/detach PowerShell scripts (first-use NTFS setup of the
+  SecondWind disk, drive-letter assignment, flush-before-detach) driven by
+  the companion, plus a Disk toggle in the UI.
+- Auto-connect now brings the disk up after the screen and tears down in
+  reverse order; on link loss the initiator session is flushed and cleaned
+  locally.
+
 ## [Unreleased — v0.1 code-complete]
 
 ### Added

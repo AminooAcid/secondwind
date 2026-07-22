@@ -101,14 +101,22 @@ pub struct NodeEventPayload {
 pub fn spawn(app: tauri::AppHandle, active_screens: ActiveScreens) {
     std::thread::spawn(move || {
         let mut tracker = PresenceTracker::default();
+        // Last-known attached disk IQN per node, so a vanished node's
+        // initiator session can still be flushed + detached locally.
+        let mut attached_disks: HashMap<NodeUuid, String> = HashMap::new();
         loop {
-            scan_once(&app, &active_screens, &mut tracker);
+            scan_once(&app, &active_screens, &mut tracker, &mut attached_disks);
             std::thread::sleep(SCAN_INTERVAL);
         }
     });
 }
 
-fn scan_once(app: &tauri::AppHandle, active_screens: &ActiveScreens, tracker: &mut PresenceTracker) {
+fn scan_once(
+    app: &tauri::AppHandle,
+    active_screens: &ActiveScreens,
+    tracker: &mut PresenceTracker,
+    attached_disks: &mut HashMap<NodeUuid, String>,
+) {
     use tauri::Emitter;
 
     let discovered = match crate::discovery::discover_secondwind_nodes(SCAN_WINDOW) {
@@ -138,9 +146,14 @@ fn scan_once(app: &tauri::AppHandle, active_screens: &ActiveScreens, tracker: &m
                 }
 
                 match auto_bring_up(app, node) {
-                    Ok(true) => {
-                        if let Ok(mut active) = active_screens.lock() {
-                            active.insert(node_uuid);
+                    Ok(Some(outcome)) => {
+                        if outcome.screen_up {
+                            if let Ok(mut active) = active_screens.lock() {
+                                active.insert(node_uuid);
+                            }
+                        }
+                        if let Some(iqn) = outcome.disk_iqn {
+                            attached_disks.insert(node_uuid, iqn);
                         }
                         let _ = app.emit(
                             NODE_CONNECTED_EVENT,
@@ -151,7 +164,7 @@ fn scan_once(app: &tauri::AppHandle, active_screens: &ActiveScreens, tracker: &m
                             },
                         );
                     }
-                    Ok(false) => {}
+                    Ok(None) => {}
                     Err(message) => {
                         let _ = app.emit(
                             NODE_CONNECTED_EVENT,
@@ -165,6 +178,12 @@ fn scan_once(app: &tauri::AppHandle, active_screens: &ActiveScreens, tracker: &m
                 }
             }
             PresenceEvent::Vanished(node_uuid) => {
+                // Teardown in reverse feature order: flush + detach the disk
+                // first, then the screen (which has already ended with the
+                // link; we just update state and tell the user).
+                if let Some(iqn) = attached_disks.remove(&node_uuid) {
+                    let _ = crate::disk_control::detach_local(&iqn);
+                }
                 let was_active = active_screens
                     .lock()
                     .map(|mut active| active.remove(&node_uuid))
@@ -184,21 +203,31 @@ fn scan_once(app: &tauri::AppHandle, active_screens: &ActiveScreens, tracker: &m
     }
 }
 
-/// Brings the screen up for a paired, always-on node. Returns Ok(false)
-/// when the node is not paired or not marked always-on (nothing to do).
+/// What auto-connect actually brought up for a node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BringUpOutcome {
+    pub screen_up: bool,
+    pub disk_iqn: Option<String>,
+}
+
+/// Brings every always-on feature up for a paired node, in order: screen,
+/// then disk. Returns Ok(None) when the node is not paired or nothing is
+/// marked always-on.
 fn auto_bring_up(
     app: &tauri::AppHandle,
     node: &crate::discovery::DiscoveredNode,
-) -> Result<bool, String> {
+) -> Result<Option<BringUpOutcome>, String> {
     let state_root = crate::commands_support::state_root(app)?;
     let mut state =
         crate::host_state::HostState::load_or_create(&state_root).map_err(|e| e.to_string())?;
 
     let Some(paired) = state.paired_node(&node.node_uuid) else {
-        return Ok(false);
+        return Ok(None);
     };
-    if !paired.screen.always_on {
-        return Ok(false);
+    let screen_wanted = paired.screen.always_on;
+    let disk_wanted = paired.disk.always_on;
+    if !screen_wanted && !disk_wanted {
+        return Ok(None);
     }
 
     let endpoint = crate::screen_control::paired_endpoint(
@@ -209,9 +238,42 @@ fn auto_bring_up(
     )
     .map_err(|error| error.to_string())?;
 
-    crate::screen_control::connect_screen(&mut state, &state_root, &node.node_uuid, &endpoint)
-        .map(|_| true)
-        .map_err(|error| error.to_string())
+    let mut outcome = BringUpOutcome {
+        screen_up: false,
+        disk_iqn: None,
+    };
+
+    if screen_wanted {
+        crate::screen_control::connect_screen(&mut state, &state_root, &node.node_uuid, &endpoint)
+            .map_err(|error| error.to_string())?;
+        outcome.screen_up = true;
+    }
+
+    if disk_wanted {
+        // A node without a provisioned data disk is normal — stay quiet.
+        match crate::disk_control::connect_disk(&state, &node.node_uuid, &endpoint) {
+            Ok(disk) => outcome.disk_iqn = Some(disk.target_iqn),
+            Err(crate::disk_control::DiskControlError::Unavailable { .. }) => {}
+            Err(error) => {
+                if outcome.screen_up {
+                    // Screen made it up; report the disk problem softly.
+                    use tauri::Emitter;
+                    let _ = app.emit(
+                        NODE_CONNECTED_EVENT,
+                        NodeEventPayload {
+                            node_uuid: node.node_uuid,
+                            display_name: node.node_name.clone(),
+                            message: error.to_string(),
+                        },
+                    );
+                } else {
+                    return Err(error.to_string());
+                }
+            }
+        }
+    }
+
+    Ok(Some(outcome))
 }
 
 #[cfg(test)]

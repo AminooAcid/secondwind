@@ -5,6 +5,8 @@ const state = {
   paired: new Map(),
   // node_uuid -> true while the screen is on
   screenOn: new Map(),
+  // node_uuid -> drive letter (or "") while the disk is attached
+  diskOn: new Map(),
   busy: false,
 };
 
@@ -23,6 +25,7 @@ const elements = {
   pinInput: document.querySelector("#pinInput"),
   pairNode: document.querySelector("#pairNode"),
   screenToggle: document.querySelector("#screenToggle"),
+  diskToggle: document.querySelector("#diskToggle"),
   statusLine: document.querySelector("#statusLine"),
 };
 
@@ -102,10 +105,16 @@ function renderDetail() {
   elements.apiVersion.textContent = node?.api_version ?? "-";
   elements.fingerprint.textContent = node?.node_certificate_fingerprint ?? "-";
 
+  const diskOn = hasNode && state.diskOn.has(node.node_uuid);
+
   elements.pairForm.hidden = !hasNode || paired;
   elements.pairNode.disabled = !hasNode || paired || state.busy;
   elements.screenToggle.disabled = !paired || state.busy;
   elements.screenToggle.textContent = screenOn ? "Turn Screen Off" : "Turn Screen On";
+  elements.diskToggle.disabled = !paired || state.busy;
+  elements.diskToggle.textContent = diskOn
+    ? `Detach Disk${state.diskOn.get(node.node_uuid) ? ` (${state.diskOn.get(node.node_uuid)}:)` : ""}`
+    : "Attach Disk";
 }
 
 function render() {
@@ -225,6 +234,38 @@ function listenForAutoConnect() {
   });
 }
 
+async function toggleDisk() {
+  const node = selectedNode();
+  if (!node || !isPaired(node.node_uuid) || state.busy) {
+    return;
+  }
+
+  const attaching = !state.diskOn.has(node.node_uuid);
+  state.busy = true;
+  render();
+  setStatus(attaching ? "Attaching the node disk…" : "Detaching the node disk…");
+
+  try {
+    const result = await tauriInvoke("set_disk", { node, enabled: attaching });
+    if (result.attached) {
+      state.diskOn.set(node.node_uuid, result.drive_letter ?? "");
+      setStatus(
+        result.drive_letter
+          ? `Node disk attached as ${result.drive_letter}:.`
+          : "Node disk attached.",
+      );
+    } else {
+      state.diskOn.delete(node.node_uuid);
+      setStatus(attaching ? (result.message ?? "Could not attach the disk.") : "Node disk detached.");
+    }
+  } catch (error) {
+    setStatus(String(error));
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
 elements.refreshNodes.addEventListener("click", refreshNodes);
 elements.pairNode.addEventListener("click", pairSelectedNode);
 elements.pinInput.addEventListener("keydown", (event) => {
@@ -233,6 +274,7 @@ elements.pinInput.addEventListener("keydown", (event) => {
   }
 });
 elements.screenToggle.addEventListener("click", toggleScreen);
+elements.diskToggle.addEventListener("click", toggleDisk);
 
 listenForAutoConnect();
 render();
