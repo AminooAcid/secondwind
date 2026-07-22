@@ -1,17 +1,25 @@
 [Unit]
 Description=SecondWind node agent
-After=network-online.target
-Wants=network-online.target
+Wants=network-online.target avahi-daemon.service
+After=network-online.target avahi-daemon.service
 
 [Service]
 Type=simple
+User=secondwind
+Group=secondwind
+# render/video: VA-API capability probing on /dev/dri render nodes.
+SupplementaryGroups=render video
 StateDirectory=secondwind
+RuntimeDirectory=secondwind
+RuntimeDirectoryPreserve=yes
 Environment=SECONDWIND_AGENT_STATE_FILE=%S/secondwind/agent-state.json
 Environment=SECONDWIND_AGENT_CERTIFICATE_FILE=%S/secondwind/node-cert.pem
 Environment=SECONDWIND_AGENT_PRIVATE_KEY_FILE=%S/secondwind/node-key.pem
+Environment=SECONDWIND_KIOSK_STATE_FILE=%t/secondwind/kiosk.json
 EnvironmentFile=-/etc/secondwind/sw-agent.env
-ExecStart=/usr/bin/sw-agent
+ExecStart=/usr/local/bin/sw-agent
 Restart=on-failure
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target

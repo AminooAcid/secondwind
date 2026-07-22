@@ -1,12 +1,29 @@
 [Unit]
 Description=SecondWind kiosk session
-After=sw-agent.service
-Requires=sw-agent.service
+# The kiosk renders whatever the agent last published, so it only needs the
+# agent ordered first, not required: a crashed agent must not blank the
+# screen.
+After=sw-agent.service systemd-user-sessions.service getty@tty1.service
+Wants=sw-agent.service
+Conflicts=getty@tty1.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/sw-kiosk
-Restart=on-failure
+User=secondwind
+Group=secondwind
+SupplementaryGroups=render video input
+PAMName=login
+TTYPath=/dev/tty1
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+Environment=SECONDWIND_KIOSK_STATE_FILE=/run/secondwind/kiosk.json
+EnvironmentFile=-/etc/secondwind/sw-kiosk.env
+# cage: bare Wayland kiosk compositor; foot: fullscreen terminal surface the
+# SecondWind kiosk UI runs in. Users only ever see sw-kiosk screens.
+ExecStart=/usr/bin/cage -d -- /usr/bin/foot --fullscreen /usr/local/bin/sw-kiosk
+Restart=always
+RestartSec=2
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=graphical.target

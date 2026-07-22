@@ -1,0 +1,21 @@
+#!/bin/sh
+# Create the unprivileged SecondWind system user that runs the agent and the
+# kiosk session. render/video/input: VA-API probing and the kiosk seat.
+
+set -e
+
+if ! getent group secondwind >/dev/null; then
+    addgroup --system secondwind
+fi
+
+if ! getent passwd secondwind >/dev/null; then
+    adduser --system --ingroup secondwind \
+        --home /var/lib/secondwind --shell /usr/sbin/nologin \
+        --disabled-password secondwind
+fi
+
+for extra_group in render video input; do
+    if getent group "$extra_group" >/dev/null; then
+        adduser secondwind "$extra_group"
+    fi
+done

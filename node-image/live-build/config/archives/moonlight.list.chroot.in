@@ -1,0 +1,4 @@
+# Moonlight official apt repository (Cloudsmith), pinned in docs/UPSTREAM.md.
+# Template: build.sh replaces @DIST@ with the image's Debian codename and
+# fetches the signing key to moonlight.key.chroot next to this file.
+deb https://dl.cloudsmith.io/public/moonlight-game-streaming/moonlight-qt/deb/debian @DIST@ main

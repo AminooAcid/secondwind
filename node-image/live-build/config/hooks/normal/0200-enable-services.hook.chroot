@@ -1,0 +1,11 @@
+#!/bin/sh
+# Enable the SecondWind services. The kiosk owns tty1 (getty is conflicted
+# away by the unit itself) and the node boots to the graphical target.
+
+set -e
+
+systemctl enable avahi-daemon.service
+systemctl enable NetworkManager.service
+systemctl enable sw-agent.service
+systemctl enable sw-kiosk.service
+systemctl set-default graphical.target

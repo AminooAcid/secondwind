@@ -1,0 +1,26 @@
+#!/bin/sh
+# SecondWind node image — live-build configuration.
+#
+# Produces a hybrid ISO that boots a live SecondWind node AND carries the
+# Debian installer (preseeded for the safe dual-boot path from FIRST-SETUP:
+# guided partitioning into the largest continuous free space).
+#
+# Override the distribution with SECONDWIND_DEBIAN_DIST; defaults to Debian
+# current stable. No machine-specific values belong in this file.
+
+set -e
+
+DIST="${SECONDWIND_DEBIAN_DIST:-stable}"
+
+lb config noauto \
+    --distribution "$DIST" \
+    --architectures amd64 \
+    --archive-areas "main contrib non-free non-free-firmware" \
+    --binary-images iso-hybrid \
+    --debian-installer live \
+    --debian-installer-gui false \
+    --bootappend-live "boot=live components quiet splash" \
+    --iso-application "SecondWind node" \
+    --iso-volume "SECONDWIND" \
+    --memtest none \
+    "${@}"

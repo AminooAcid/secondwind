@@ -1,0 +1,28 @@
+# SecondWind node package set — lean, no desktop environment.
+
+# Kiosk shell: bare Wayland compositor + fullscreen terminal surface.
+cage
+foot
+
+# Streaming client (from the Moonlight apt repository, see archives/).
+moonlight-qt
+
+# Discovery.
+avahi-daemon
+
+# Capability detection + hardware video decode. All three VA-API drivers are
+# installed; the right one is chosen at runtime per GPU generation.
+libva-utils
+i965-va-driver
+intel-media-va-driver-non-free
+mesa-va-drivers
+va-driver-all
+
+# Networking for beginners (Wi-Fi for updates + the SecondWind link).
+network-manager
+
+# Firmware for old laptops (Wi-Fi/GPU blobs).
+firmware-linux
+firmware-iwlwifi
+firmware-realtek
+firmware-atheros
