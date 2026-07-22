@@ -134,10 +134,13 @@ pub fn merged_config(existing: &str, managed: &[(String, String)]) -> String {
     result
 }
 
+/// Applies the managed config block. Returns `true` when the file actually
+/// changed (so the caller knows a service restart is needed for Apollo to
+/// pick it up — Apollo only reads its config at startup).
 pub fn apply_managed_config(
     installation: &ApolloInstallation,
     host_display_name: &str,
-) -> Result<(), ApolloError> {
+) -> Result<bool, ApolloError> {
     let existing = match fs::read_to_string(&installation.config_file) {
         Ok(contents) => contents,
         Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
@@ -150,6 +153,9 @@ pub fn apply_managed_config(
     };
 
     let merged = merged_config(&existing, &managed_config_entries(host_display_name));
+    if merged == existing {
+        return Ok(false);
+    }
     if let Some(parent) = installation.config_file.parent() {
         fs::create_dir_all(parent).map_err(|source| ApolloError::ConfigWrite {
             path: parent.to_path_buf(),
@@ -159,7 +165,8 @@ pub fn apply_managed_config(
     fs::write(&installation.config_file, merged).map_err(|source| ApolloError::ConfigWrite {
         path: installation.config_file.clone(),
         source,
-    })
+    })?;
+    Ok(true)
 }
 
 /// Dashboard credentials owned by SecondWind. Random, generated once, stored
@@ -172,15 +179,19 @@ pub struct ApolloCredentials {
 
 pub const CREDENTIALS_FILE_NAME: &str = "apollo-credentials.json";
 
+/// Loads our dashboard credentials, creating and registering them with
+/// Apollo on first use. The `bool` is `true` when they were just created
+/// (the running service still holds the old ones and must be restarted
+/// before the API accepts them — verified on hardware: a 401 otherwise).
 pub fn load_or_create_credentials(
     state_root: &Path,
     installation: &ApolloInstallation,
-) -> Result<ApolloCredentials, ApolloError> {
+) -> Result<(ApolloCredentials, bool), ApolloError> {
     let credentials_file = state_root.join(CREDENTIALS_FILE_NAME);
     match fs::read_to_string(&credentials_file) {
-        Ok(contents) => {
-            serde_json::from_str(&contents).map_err(|source| ApolloError::Parse { source })
-        }
+        Ok(contents) => serde_json::from_str(&contents)
+            .map(|credentials| (credentials, false))
+            .map_err(|source| ApolloError::Parse { source }),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             let credentials = ApolloCredentials {
                 username: format!("secondwind-{}", random_token(8)?),
@@ -198,7 +209,7 @@ pub fn load_or_create_credentials(
                 path: credentials_file.clone(),
                 source,
             })?;
-            Ok(credentials)
+            Ok((credentials, true))
         }
         Err(source) => Err(ApolloError::ConfigRead {
             path: credentials_file,
@@ -261,17 +272,17 @@ pub fn arm_stream_pair_pin(
         base64_encode(format!("{}:{}", credentials.username, credentials.password).as_bytes())
     );
 
-    let response = agent
+    match agent
         .post(&format!("{api_base}/api/pin"))
         .set("authorization", &authorization)
         .set("content-type", "application/json")
         .send_string(&payload.to_string())
-        .map_err(|source| ApolloError::Api(Box::new(source)))?;
-
-    if response.status() >= 200 && response.status() < 300 {
-        Ok(())
-    } else {
-        Err(ApolloError::PinRejected)
+    {
+        Ok(_) => Ok(()),
+        // Stale credentials in the running service — the caller restarts.
+        Err(ureq::Error::Status(401, _)) => Err(ApolloError::Unauthorized),
+        Err(ureq::Error::Status(_, _)) => Err(ApolloError::PinRejected),
+        Err(source) => Err(ApolloError::Api(Box::new(source))),
     }
 }
 
@@ -398,6 +409,78 @@ fn service_query_running(name: &str) -> Result<bool, ApolloError> {
     Ok(text.contains("RUNNING"))
 }
 
+/// Which service name is actually installed (first one that responds to a
+/// query), so restart targets the right one.
+fn installed_service_name() -> Option<String> {
+    let mut names = vec![service_name()];
+    for default in DEFAULT_SERVICE_NAMES {
+        if !names.iter().any(|name| name == default) {
+            names.push(default.to_string());
+        }
+    }
+    names.into_iter().find(|name| {
+        Command::new("sc.exe")
+            .args(["query", name])
+            .output()
+            .map(|output| {
+                let text = String::from_utf8_lossy(&output.stdout);
+                text.contains("STATE") // any state line = the service exists
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// Restarts Apollo so it reloads freshly written config + credentials, then
+/// waits for the dashboard API to answer (needs admin, like the rest of
+/// the Apollo control path).
+pub fn restart_service_and_wait(credentials: &ApolloCredentials) -> Result<(), ApolloError> {
+    let name = installed_service_name().ok_or(ApolloError::ServiceUnavailable)?;
+    let _ = Command::new("sc.exe").args(["stop", &name]).status();
+    // Wait for it to actually stop before starting again.
+    for _ in 0..20 {
+        if !service_query_running(&name).unwrap_or(true) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    let started = Command::new("sc.exe")
+        .args(["start", &name])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if !started && !service_query_running(&name).unwrap_or(false) {
+        return Err(ApolloError::ServiceUnavailable);
+    }
+    wait_for_api_ready(&api_base(), credentials)
+}
+
+/// Polls the dashboard API until an authenticated request succeeds (the
+/// service has finished loading our credentials), or times out.
+fn wait_for_api_ready(api_base: &str, credentials: &ApolloCredentials) -> Result<(), ApolloError> {
+    let agent = localhost_agent()?;
+    let authorization = format!(
+        "Basic {}",
+        base64_encode(format!("{}:{}", credentials.username, credentials.password).as_bytes())
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let url = format!("{api_base}/api/apps");
+
+    loop {
+        // `/api/apps` needs auth: 2xx means our creds are live; a transport
+        // error means the service is still coming up; 401 means it hasn't
+        // reloaded creds yet — keep waiting on both.
+        match agent.get(&url).set("authorization", &authorization).call() {
+            Ok(_) => return Ok(()),
+            Err(ureq::Error::Status(code, _)) if (200..300).contains(&code) => return Ok(()),
+            _ => {}
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(ApolloError::ServiceUnavailable);
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
 #[derive(Debug)]
 pub enum ApolloError {
     NotInstalled,
@@ -408,6 +491,7 @@ pub enum ApolloError {
     Process { source: io::Error },
     CredentialSetupFailed,
     Randomness,
+    Unauthorized,
     Tls(rustls::Error),
     Api(Box<ureq::Error>),
     PinRejected,
@@ -437,6 +521,9 @@ impl std::fmt::Display for ApolloError {
             Self::PinRejected => {
                 write!(formatter, "the screen engine rejected the pairing code")
             }
+            Self::Unauthorized => {
+                write!(formatter, "the screen engine rejected SecondWind's credentials")
+            }
             Self::ServiceUnavailable => {
                 write!(formatter, "the screen engine service could not be started")
             }
@@ -456,6 +543,7 @@ impl std::error::Error for ApolloError {
             | Self::CredentialSetupFailed
             | Self::Randomness
             | Self::PinRejected
+            | Self::Unauthorized
             | Self::ServiceUnavailable => None,
         }
     }
