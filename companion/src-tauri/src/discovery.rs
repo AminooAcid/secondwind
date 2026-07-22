@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    net::IpAddr,
     time::{Duration, Instant},
 };
 
@@ -73,6 +74,7 @@ pub struct DiscoveredNode {
     pub node_uuid: NodeUuid,
     pub node_name: String,
     pub host_name: String,
+    pub addresses: Vec<IpAddr>,
     pub api_port: u16,
     pub api_version: String,
     pub node_certificate_fingerprint: String,
@@ -93,11 +95,19 @@ pub fn discovered_node_from_service(
     let node_name = required_txt(service, TXT_KEY_NODE_NAME)?.to_string();
     let api_version = required_txt(service, TXT_KEY_API_VERSION)?.to_string();
     let node_certificate_fingerprint = required_txt(service, TXT_KEY_NODE_CERT_SHA256)?.to_string();
+    // Prefer IPv4 first for connection attempts; order is deterministic.
+    let mut addresses: Vec<IpAddr> = service
+        .get_addresses()
+        .iter()
+        .map(|scoped| scoped.to_ip_addr())
+        .collect();
+    addresses.sort_by_key(|address| (address.is_ipv6(), *address));
 
     Ok(DiscoveredNode {
         node_uuid,
         node_name,
         host_name: service.get_hostname().to_string(),
+        addresses,
         api_port: service.get_port(),
         api_version,
         node_certificate_fingerprint,
@@ -185,6 +195,7 @@ mod tests {
             "00000000-0000-4000-8000-000000000004"
         );
         assert_eq!(node.node_name, "node");
+        assert_eq!(node.addresses, vec![IpAddr::V4(Ipv4Addr::LOCALHOST)]);
         assert_eq!(node.api_port, 49152);
         assert_eq!(node.api_version, CURRENT_AGENT_API_VERSION);
         assert_eq!(node.node_certificate_fingerprint, "sha256:fingerprint");
