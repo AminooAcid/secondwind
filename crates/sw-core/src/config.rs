@@ -1,33 +1,42 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::capabilities::PanelMode;
 
 pub const CURRENT_CONFIG_VERSION: u16 = 1;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct NodeUuid(String);
+pub struct NodeUuid(Uuid);
 
 impl NodeUuid {
-    pub fn new(value: impl Into<String>) -> Result<Self, ConfigError> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            return Err(ConfigError::EmptyNodeUuid);
-        }
+    pub fn new(value: impl AsRef<str>) -> Result<Self, ConfigError> {
+        let value = value.as_ref().trim();
+        let uuid = Uuid::parse_str(value).map_err(|_| ConfigError::InvalidNodeUuid)?;
 
-        Ok(Self(value))
+        Ok(Self(uuid))
     }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
+    pub fn new_v4() -> Self {
+        Self(Uuid::new_v4())
+    }
+
+    pub fn as_uuid(&self) -> Uuid {
+        self.0
+    }
+}
+
+impl std::fmt::Display for NodeUuid {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.0)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigError {
-    EmptyNodeUuid,
+    InvalidNodeUuid,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,7 +85,8 @@ mod tests {
 
     #[test]
     fn config_round_trips_as_json() {
-        let node_id = NodeUuid::new("node-test-uuid").expect("valid test uuid");
+        let node_id =
+            NodeUuid::new("00000000-0000-4000-8000-000000000001").expect("valid test uuid");
         let mut config = SecondWindConfig::empty(HostConfig {
             display_name: "host".to_string(),
         });
@@ -105,7 +115,11 @@ mod tests {
     }
 
     #[test]
-    fn node_uuid_rejects_empty_values() {
-        assert_eq!(NodeUuid::new("  "), Err(ConfigError::EmptyNodeUuid));
+    fn node_uuid_rejects_invalid_values() {
+        assert_eq!(NodeUuid::new("  "), Err(ConfigError::InvalidNodeUuid));
+        assert_eq!(
+            NodeUuid::new("not-a-uuid"),
+            Err(ConfigError::InvalidNodeUuid)
+        );
     }
 }

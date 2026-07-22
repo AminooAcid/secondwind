@@ -40,6 +40,8 @@ The host and node sides must both become easier than the Phase 0 proof:
 7. The agent supervises the kiosk streaming client.
 8. Disconnect tears down the virtual display path cleanly.
 
+`sw-core` models node IDs as validated UUIDs. Placeholder display names may be user-friendly strings, but persistent host-side state and trust are keyed by real node UUID values.
+
 ## API
 
 The API is versioned under `/v1/`.

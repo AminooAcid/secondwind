@@ -81,7 +81,8 @@ mod tests {
 
     fn test_state(decoders: Vec<VideoDecoderCapability>) -> AgentState {
         AgentState {
-            node_uuid: NodeUuid::new("node-for-api-tests").expect("valid node uuid"),
+            node_uuid: NodeUuid::new("00000000-0000-4000-8000-000000000002")
+                .expect("valid node uuid"),
             capabilities: NodeCapabilities {
                 node_name: "node".to_string(),
                 screen: ScreenCapabilities {
@@ -120,8 +121,8 @@ mod tests {
         let state = test_state(Vec::new());
 
         assert_eq!(
-            capabilities_response(&state).node_uuid.as_str(),
-            "node-for-api-tests"
+            capabilities_response(&state).node_uuid.to_string(),
+            "00000000-0000-4000-8000-000000000002"
         );
         assert_eq!(capabilities_response(&state).capabilities.node_name, "node");
     }
