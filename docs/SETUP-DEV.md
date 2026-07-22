@@ -26,7 +26,7 @@ Expected result:
 
 - The Tauri companion is scaffolded but not yet implemented.
 - The node image folders are scaffolded but do not yet produce an image.
-- The agent has shared types and a binary skeleton but no HTTP listener yet.
+- The agent has an HTTP router and runtime config, but mutual TLS/discovery are still upcoming.
 - No upstream binaries are bundled yet.
 
 ## User Experience Rule
@@ -39,10 +39,13 @@ The agent requires an explicit state file path. Binding a network listener is op
 
 ```powershell
 $env:SECONDWIND_AGENT_STATE_FILE=".tmp\sw-agent-state.json"
+$env:SECONDWIND_AGENT_CERTIFICATE_FILE=".tmp\sw-agent-node-cert.pem"
+$env:SECONDWIND_AGENT_PRIVATE_KEY_FILE=".tmp\sw-agent-node-key.pem"
 $env:SECONDWIND_AGENT_NODE_NAME="SecondWind dev node"
 cargo run -p sw-agent
 ```
 
-Expected result: the command prints a JSON health object and creates the state file if it does not exist.
+Expected result: the command prints a JSON health object and creates the state, certificate, and key files if they do not exist.
 
 To serve the in-process API router during development, also set `SECONDWIND_AGENT_BIND` to a socket address chosen by the developer or test harness.
+

@@ -21,6 +21,14 @@ pub struct AgentState {
 
 impl AgentState {
     pub fn detect(node_uuid: NodeUuid, node_name: String) -> Self {
+        Self::detect_with_pairing(node_uuid, node_name, unavailable_pairing())
+    }
+
+    pub fn detect_with_pairing(
+        node_uuid: NodeUuid,
+        node_name: String,
+        pairing: PairingState,
+    ) -> Self {
         let decoders = probe_vaapi_devices()
             .into_iter()
             .filter_map(|probe| probe.to_decoder_capability())
@@ -35,7 +43,7 @@ impl AgentState {
                     decoders,
                 },
             },
-            pairing: Arc::new(RwLock::new(unavailable_pairing())),
+            pairing: Arc::new(RwLock::new(pairing)),
         }
     }
 
@@ -184,6 +192,21 @@ mod tests {
             "00000000-0000-4000-8000-000000000002"
         );
         assert_eq!(capabilities_response(&state).capabilities.node_name, "node");
+    }
+
+    #[test]
+    fn detect_with_pairing_preserves_runtime_pairing_state() {
+        let pairing = waiting_pairing_state();
+        let state = AgentState::detect_with_pairing(
+            NodeUuid::new("00000000-0000-4000-8000-000000000004").expect("valid uuid"),
+            "node".to_string(),
+            pairing,
+        );
+
+        assert_eq!(
+            pairing_status_response(&state).status,
+            PairingStatus::WaitingForHost
+        );
     }
 
     #[test]

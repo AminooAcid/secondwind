@@ -55,9 +55,9 @@ Pairing and feature-control routes will be added as v0.1 implementation progress
 
 The first API slice provides these routes as an in-process router so behavior can be tested before choosing bind configuration. It does not hardcode a listening interface or port.
 
-Agent runtime configuration is supplied outside source. The agent reads its state-file path, optional bind address, and display name from environment/config so source does not bake in ports, interfaces, or machine-specific paths.
+Agent runtime configuration is supplied outside source. The agent reads its state-file path, certificate path, key path, optional bind address, and display name from environment/config so source does not bake in ports, interfaces, or machine-specific paths.
 
-Pairing routes currently expose explicit `Unavailable`, `WaitingForHost`, and `Paired` states. Certificate generation and mutual TLS are still upcoming v0.1 work; until certificate material exists, the agent must report pairing unavailable rather than fabricate trust.
+Pairing routes currently expose explicit `Unavailable`, `WaitingForHost`, and `Paired` states. The agent generates and persists node certificate material from externally supplied paths, then exposes the node certificate fingerprint in pairing state. Mutual TLS and paired-host trust storage are still upcoming v0.1 work.
 
 ## Capability Detection
 
@@ -76,3 +76,4 @@ Capability detection must inspect the running machine. It must not assume:
 The Phase 0 proof showed why this matters: the working Intel H.264 decoder was not the first render device.
 
 Current first slice implements a VA-API probe that enumerates `/dev/dri/renderD*`, runs `vainfo` for each candidate render node, and treats H.264 support as valid only when `VAEntrypointVLD` is present. This will feed `/v1/capabilities` as the agent API is built out.
+

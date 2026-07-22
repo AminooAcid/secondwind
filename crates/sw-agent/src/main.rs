@@ -2,10 +2,14 @@ use std::{env, error::Error, net::SocketAddr, path::PathBuf};
 
 use sw_agent::{
     api::{AgentState, health_response, router},
+    certificates::load_or_create_certificate,
     identity::load_or_create_identity,
+    pairing_state::runtime_pairing_offer,
 };
 
 const STATE_FILE_ENV: &str = "SECONDWIND_AGENT_STATE_FILE";
+const CERTIFICATE_FILE_ENV: &str = "SECONDWIND_AGENT_CERTIFICATE_FILE";
+const PRIVATE_KEY_FILE_ENV: &str = "SECONDWIND_AGENT_PRIVATE_KEY_FILE";
 const BIND_ENV: &str = "SECONDWIND_AGENT_BIND";
 const NODE_NAME_ENV: &str = "SECONDWIND_AGENT_NODE_NAME";
 const DEFAULT_NODE_NAME: &str = "SecondWind node";
@@ -14,7 +18,17 @@ const DEFAULT_NODE_NAME: &str = "SecondWind node";
 async fn main() -> Result<(), Box<dyn Error>> {
     let runtime = AgentRuntimeConfig::from_env()?;
     let identity = load_or_create_identity(&runtime.state_file, runtime.node_name)?;
-    let state = AgentState::detect(identity.node_uuid, identity.node_name);
+    let certificate = load_or_create_certificate(
+        &runtime.certificate_file,
+        &runtime.private_key_file,
+        identity.node_uuid.to_string(),
+    )?;
+    let pairing = runtime_pairing_offer(
+        identity.node_uuid,
+        identity.node_name.clone(),
+        certificate.fingerprint,
+    );
+    let state = AgentState::detect_with_pairing(identity.node_uuid, identity.node_name, pairing);
 
     if let Some(bind_addr) = runtime.bind_addr {
         let listener = tokio::net::TcpListener::bind(bind_addr).await?;
@@ -33,6 +47,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AgentRuntimeConfig {
     state_file: PathBuf,
+    certificate_file: PathBuf,
+    private_key_file: PathBuf,
     bind_addr: Option<SocketAddr>,
     node_name: String,
 }
@@ -43,6 +59,14 @@ impl AgentRuntimeConfig {
             .map(PathBuf::from)
             .filter(|path| !path.as_os_str().is_empty())
             .ok_or(AgentRuntimeConfigError::MissingStateFile)?;
+        let certificate_file = env::var_os(CERTIFICATE_FILE_ENV)
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty())
+            .ok_or(AgentRuntimeConfigError::MissingCertificateFile)?;
+        let private_key_file = env::var_os(PRIVATE_KEY_FILE_ENV)
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty())
+            .ok_or(AgentRuntimeConfigError::MissingPrivateKeyFile)?;
 
         let bind_addr = match env::var(BIND_ENV) {
             Ok(value) if !value.trim().is_empty() => Some(
@@ -60,6 +84,8 @@ impl AgentRuntimeConfig {
 
         Ok(Self {
             state_file,
+            certificate_file,
+            private_key_file,
             bind_addr,
             node_name,
         })
@@ -69,6 +95,8 @@ impl AgentRuntimeConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AgentRuntimeConfigError {
     MissingStateFile,
+    MissingCertificateFile,
+    MissingPrivateKeyFile,
     InvalidBind,
 }
 
@@ -78,6 +106,14 @@ impl std::fmt::Display for AgentRuntimeConfigError {
             Self::MissingStateFile => write!(
                 formatter,
                 "missing {STATE_FILE_ENV}; the node image or dev shell must provide an agent state file path"
+            ),
+            Self::MissingCertificateFile => write!(
+                formatter,
+                "missing {CERTIFICATE_FILE_ENV}; the node image or dev shell must provide a node certificate file path"
+            ),
+            Self::MissingPrivateKeyFile => write!(
+                formatter,
+                "missing {PRIVATE_KEY_FILE_ENV}; the node image or dev shell must provide a node private key file path"
             ),
             Self::InvalidBind => write!(
                 formatter,

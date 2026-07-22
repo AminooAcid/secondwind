@@ -10,6 +10,10 @@ pub enum PairingState {
 }
 
 impl PairingState {
+    pub fn waiting(offer: PairingOffer) -> Self {
+        Self::Waiting { offer }
+    }
+
     pub fn status_response(&self) -> PairingStatusResponse {
         match self {
             Self::Unavailable { reason } => PairingStatusResponse {
@@ -66,6 +70,24 @@ pub fn unavailable_pairing() -> PairingState {
     }
 }
 
+pub fn runtime_pairing_offer(
+    node_uuid: sw_core::NodeUuid,
+    node_name: String,
+    certificate_fingerprint: String,
+) -> PairingState {
+    PairingState::waiting(PairingOffer {
+        node_uuid,
+        node_name,
+        certificate_fingerprint,
+        pin: generate_pairing_pin(),
+    })
+}
+
+pub fn generate_pairing_pin() -> PairingPin {
+    let value = sw_core::NodeUuid::new_v4().as_uuid().as_u128() % 1_000_000;
+    PairingPin::new(format!("{value:06}")).expect("generated pairing PIN should be six digits")
+}
+
 pub fn fixed_pin_for_tests() -> PairingPin {
     PairingPin::new("123456").expect("fixed test pin is valid")
 }
@@ -86,6 +108,35 @@ mod tests {
                 pin: fixed_pin_for_tests(),
             },
         }
+    }
+
+    #[test]
+    fn generated_pin_is_six_digits() {
+        let pin = generate_pairing_pin();
+
+        assert_eq!(pin.expose_for_pairing_display().len(), 6);
+        assert!(
+            pin.expose_for_pairing_display()
+                .bytes()
+                .all(|byte| byte.is_ascii_digit())
+        );
+    }
+
+    #[test]
+    fn runtime_pairing_offer_uses_runtime_values() {
+        let node_uuid = NodeUuid::new("00000000-0000-4000-8000-000000000004").expect("valid uuid");
+        let state = runtime_pairing_offer(
+            node_uuid,
+            "node".to_string(),
+            "sha256:fingerprint".to_string(),
+        );
+
+        let PairingState::Waiting { offer } = state else {
+            panic!("expected waiting state");
+        };
+        assert_eq!(offer.node_uuid, node_uuid);
+        assert_eq!(offer.node_name, "node");
+        assert_eq!(offer.certificate_fingerprint, "sha256:fingerprint");
     }
 
     #[test]
