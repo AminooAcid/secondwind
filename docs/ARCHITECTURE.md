@@ -33,7 +33,7 @@ The host and node sides must both become easier than the Phase 0 proof:
 ## v0.1 Flow
 
 1. The node boots into a minimal Debian system.
-2. `sw-agent` detects screen capabilities and advertises the node.
+2. `sw-agent` detects screen capabilities and advertises the node over `_secondwind._tcp.local.` with its runtime API port and certificate fingerprint.
 3. The companion discovers the node.
 4. The node shows a pairing QR/PIN.
 5. The companion completes pairing and stores trust by node UUID.
@@ -78,3 +78,7 @@ The Phase 0 proof showed why this matters: the working Intel H.264 decoder was n
 
 Current first slice implements a VA-API probe that enumerates `/dev/dri/renderD*`, runs `vainfo` for each candidate render node, and treats H.264 support as valid only when `VAEntrypointVLD` is present. This will feed `/v1/capabilities` as the agent API is built out.
 
+
+## Discovery
+
+The node advertises _secondwind._tcp.local. only after the HTTPS listener has bound, so the advertised port comes from runtime state rather than source constants. TXT records include the node UUID, node display name, node certificate fingerprint, and API version. Address selection is delegated to the mDNS daemon so source does not assume an interface or IP address.

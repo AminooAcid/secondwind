@@ -1,8 +1,14 @@
-use std::{env, error::Error, net::SocketAddr, path::PathBuf};
+use std::{
+    env,
+    error::Error,
+    net::{SocketAddr, TcpListener},
+    path::PathBuf,
+};
 
 use sw_agent::{
     api::{AgentState, health_response, router},
     certificates::load_or_create_certificate,
+    discovery::advertise_node,
     identity::load_or_create_identity,
     pairing_state::{PairingState, runtime_pairing_offer},
     tls::agent_tls_config,
@@ -32,12 +38,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
             certificate.fingerprint.clone(),
         )?,
     };
-    let state = AgentState::detect_with_pairing(identity.node_uuid, identity.node_name, pairing)
-        .with_identity_store(runtime.state_file.clone());
+    let state =
+        AgentState::detect_with_pairing(identity.node_uuid, identity.node_name.clone(), pairing)
+            .with_identity_store(runtime.state_file.clone());
 
     if let Some(bind_addr) = runtime.bind_addr {
         let tls_config = agent_tls_config(&certificate, identity.paired_host.as_ref())?;
-        axum_server::bind_rustls(bind_addr, tls_config)
+        let listener = TcpListener::bind(bind_addr)?;
+        let advertised_port = listener.local_addr()?.port();
+        let _mdns = advertise_node(
+            identity.node_uuid,
+            &identity.node_name,
+            &certificate.fingerprint,
+            advertised_port,
+        )?;
+        axum_server::from_tcp_rustls(listener, tls_config)?
             .serve(router(state).into_make_service())
             .await?;
     } else {
