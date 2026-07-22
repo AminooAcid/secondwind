@@ -73,66 +73,51 @@ pub fn connect_screen(
     let node_display_name = node.display_name.clone();
     let stream_already_paired = node.screen.stream_paired;
 
-    // 1. Screen engine up and configured, silently.
+    // 1. Screen engine detected and its managed config written.
     let installation = apollo::detect_installation().ok_or(ScreenControlError::Apollo(
         apollo::ApolloError::NotInstalled,
     ))?;
     let config_changed =
         apollo::apply_managed_config(&installation, &state.config.host.display_name)
             .map_err(ScreenControlError::Apollo)?;
-    apollo::ensure_service_running().map_err(ScreenControlError::Apollo)?;
 
     // 2. Arm the one-shot inner pairing PIN if this node never paired.
     let stream_pair_pin = if stream_already_paired {
+        // Still make sure Apollo is up if we changed its config.
+        if config_changed {
+            let (credentials, created) = apollo::load_or_create_credentials(state_root)
+                .map_err(ScreenControlError::Apollo)?;
+            apollo::prepare_apollo(&installation, &credentials, created)
+                .map_err(ScreenControlError::Apollo)?;
+        }
         None
     } else {
         let (credentials, credentials_created) =
-            apollo::load_or_create_credentials(state_root, &installation)
-                .map_err(ScreenControlError::Apollo)?;
-        // Apollo only reads its config + credentials at startup. Restart it
-        // when we just changed either; otherwise wait for the API and only
-        // restart if it's answering with stale credentials (a slow-but-fine
-        // Apollo must NOT trigger a restart — all found on hardware).
+            apollo::load_or_create_credentials(state_root).map_err(ScreenControlError::Apollo)?;
+
+        // Bring Apollo to a known-good state in one clean cycle when we
+        // changed its config or minted new credentials; otherwise just
+        // confirm the API is up, and only then repair it if it isn't.
         if config_changed || credentials_created {
-            apollo::restart_service_and_wait(&credentials).map_err(ScreenControlError::Apollo)?;
+            apollo::prepare_apollo(&installation, &credentials, credentials_created)
+                .map_err(ScreenControlError::Apollo)?;
         } else {
             match apollo::wait_for_api_ready(&credentials) {
                 apollo::ApiReadiness::Ready => {}
                 apollo::ApiReadiness::StaleCredentials => {
-                    apollo::restart_service_and_wait(&credentials)
+                    apollo::prepare_apollo(&installation, &credentials, true)
                         .map_err(ScreenControlError::Apollo)?;
                 }
                 apollo::ApiReadiness::Down => {
-                    return Err(ScreenControlError::Apollo(
-                        apollo::ApolloError::ServiceUnavailable,
-                    ));
+                    apollo::prepare_apollo(&installation, &credentials, false)
+                        .map_err(ScreenControlError::Apollo)?;
                 }
             }
         }
+
         let pin = apollo::generate_stream_pair_pin().map_err(ScreenControlError::Apollo)?;
-        match apollo::arm_stream_pair_pin(
-            &apollo::api_base(),
-            &credentials,
-            &pin,
-            &node_display_name,
-        ) {
-            Ok(()) => {}
-            // The running service still holds stale credentials (e.g. it
-            // predates our first setup): restart once so it reloads them,
-            // then arm again.
-            Err(apollo::ApolloError::Unauthorized) => {
-                apollo::restart_service_and_wait(&credentials)
-                    .map_err(ScreenControlError::Apollo)?;
-                apollo::arm_stream_pair_pin(
-                    &apollo::api_base(),
-                    &credentials,
-                    &pin,
-                    &node_display_name,
-                )
-                .map_err(ScreenControlError::Apollo)?;
-            }
-            Err(other) => return Err(ScreenControlError::Apollo(other)),
-        }
+        apollo::arm_stream_pair_pin(&apollo::api_base(), &credentials, &pin, &node_display_name)
+            .map_err(ScreenControlError::Apollo)?;
         Some(pin)
     };
 

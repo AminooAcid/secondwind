@@ -195,7 +195,6 @@ pub const CREDENTIALS_FILE_NAME: &str = "apollo-credentials.json";
 /// before the API accepts them — verified on hardware: a 401 otherwise).
 pub fn load_or_create_credentials(
     state_root: &Path,
-    installation: &ApolloInstallation,
 ) -> Result<(ApolloCredentials, bool), ApolloError> {
     let credentials_file = state_root.join(CREDENTIALS_FILE_NAME);
     match fs::read_to_string(&credentials_file) {
@@ -207,8 +206,8 @@ pub fn load_or_create_credentials(
                 username: format!("secondwind-{}", random_token(8)?),
                 password: random_token(24)?,
             };
-            // Register with Apollo first; only persist ours once accepted.
-            set_apollo_credentials(installation, &credentials)?;
+            // Persist our copy only; registering with Apollo happens in
+            // `prepare_apollo` while the service is stopped.
             let contents = serde_json::to_string_pretty(&credentials)
                 .map_err(|source| ApolloError::Serialize { source })?;
             fs::create_dir_all(state_root).map_err(|source| ApolloError::ConfigWrite {
@@ -228,44 +227,71 @@ pub fn load_or_create_credentials(
     }
 }
 
-/// Registers dashboard credentials with Apollo via `sunshine.exe --creds`.
+/// Brings Apollo into the state SecondWind needs, in ONE clean cycle:
+/// stop → (register our credentials while stopped) → start → wait for the
+/// API to accept our credentials. This is the only place that starts/stops
+/// Apollo on the screen path, so there is no churn and `--creds` never
+/// races the live service (which corrupted its state on hardware).
 ///
-/// Critically, this **stops the service first** so `--creds` is the only
-/// `sunshine` process touching Apollo's credential/state files. Running it
-/// against a live service corrupted the credentials file on hardware
-/// (Apollo then crash-looped before its web UI could bind). The service is
-/// left stopped; the caller restarts it.
-fn set_apollo_credentials(
+/// `register_credentials` is true when our credentials are new (or the
+/// running service rejected them); config changes are always picked up
+/// because the whole service restarts here.
+pub fn prepare_apollo(
     installation: &ApolloInstallation,
     credentials: &ApolloCredentials,
+    register_credentials: bool,
 ) -> Result<(), ApolloError> {
-    if let Some(name) = installed_service_name() {
-        let _ = Command::new("sc.exe").args(["stop", &name]).status();
-        let stop_deadline = std::time::Instant::now() + Duration::from_secs(45);
-        while service_state(&name) != ServiceState::Stopped {
-            if std::time::Instant::now() >= stop_deadline {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(500));
+    let name = installed_service_name().ok_or(ApolloError::ServiceUnavailable)?;
+
+    // 1. Stop and wait for fully STOPPED (Apollo passes through
+    // STOP_PENDING for up to ~30 s).
+    let _ = Command::new("sc.exe").args(["stop", &name]).status();
+    let stop_deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while service_state(&name) != ServiceState::Stopped {
+        if std::time::Instant::now() >= stop_deadline {
+            return Err(ApolloError::ServiceUnavailable);
         }
-        // Kill any stray sunshine so nothing else writes the state files.
-        let _ = Command::new("taskkill")
-            .args(["/F", "/IM", "sunshine.exe"])
-            .status();
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    // Kill any stray sunshine so nothing else holds ports or state files.
+    let _ = Command::new("taskkill")
+        .args(["/F", "/IM", "sunshine.exe"])
+        .status();
+    std::thread::sleep(Duration::from_millis(500));
+
+    // 2. Register credentials with the service stopped (single writer).
+    if register_credentials {
+        let status = Command::new(&installation.executable)
+            .arg("--creds")
+            .arg(&credentials.username)
+            .arg(&credentials.password)
+            .status()
+            .map_err(|source| ApolloError::Process { source })?;
+        if !status.success() {
+            return Err(ApolloError::CredentialSetupFailed);
+        }
+    }
+
+    // 3. Start and wait for RUNNING.
+    let start_deadline = std::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        match service_state(&name) {
+            ServiceState::Running => break,
+            ServiceState::Transitional => {}
+            _ => {
+                let _ = Command::new("sc.exe").args(["start", &name]).status();
+            }
+        }
+        if std::time::Instant::now() >= start_deadline {
+            return Err(ApolloError::ServiceUnavailable);
+        }
         std::thread::sleep(Duration::from_millis(500));
     }
 
-    let status = Command::new(&installation.executable)
-        .arg("--creds")
-        .arg(&credentials.username)
-        .arg(&credentials.password)
-        .status()
-        .map_err(|source| ApolloError::Process { source })?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err(ApolloError::CredentialSetupFailed)
+    // 4. Wait for the dashboard API to accept our credentials.
+    match wait_for_api_ready_at(&api_base(), credentials) {
+        ApiReadiness::Ready => Ok(()),
+        _ => Err(ApolloError::ServiceUnavailable),
     }
 }
 
@@ -496,46 +522,6 @@ fn installed_service_name() -> Option<String> {
 /// Restarts Apollo so it reloads freshly written config + credentials, then
 /// waits for the dashboard API to answer (needs admin, like the rest of
 /// the Apollo control path).
-pub fn restart_service_and_wait(credentials: &ApolloCredentials) -> Result<(), ApolloError> {
-    let name = installed_service_name().ok_or(ApolloError::ServiceUnavailable)?;
-
-    // Stop and wait for the *fully STOPPED* state — Apollo takes up to
-    // ~30 s and passes through STOP_PENDING, during which a start fails
-    // with 1056 "already running" (found on hardware).
-    let _ = Command::new("sc.exe").args(["stop", &name]).status();
-    let stop_deadline = std::time::Instant::now() + Duration::from_secs(45);
-    while service_state(&name) != ServiceState::Stopped {
-        if std::time::Instant::now() >= stop_deadline {
-            return Err(ApolloError::ServiceUnavailable);
-        }
-        std::thread::sleep(Duration::from_millis(500));
-    }
-
-    // Start and wait for RUNNING; retry the start while it is still
-    // transitioning.
-    let start_deadline = std::time::Instant::now() + Duration::from_secs(30);
-    loop {
-        match service_state(&name) {
-            ServiceState::Running => break,
-            ServiceState::Transitional => {}
-            _ => {
-                let _ = Command::new("sc.exe").args(["start", &name]).status();
-            }
-        }
-        if std::time::Instant::now() >= start_deadline {
-            return Err(ApolloError::ServiceUnavailable);
-        }
-        std::thread::sleep(Duration::from_millis(500));
-    }
-
-    // After a fresh start the service reads our credentials from disk, so
-    // Ready is expected; anything else means it genuinely failed to come up.
-    match wait_for_api_ready_at(&api_base(), credentials) {
-        ApiReadiness::Ready => Ok(()),
-        _ => Err(ApolloError::ServiceUnavailable),
-    }
-}
-
 /// Polls the dashboard API until an authenticated request succeeds (the
 /// service has finished coming up and loaded our credentials), or times
 /// out. A timeout means either still-down or stale credentials — the
