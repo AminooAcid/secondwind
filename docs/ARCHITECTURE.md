@@ -51,6 +51,8 @@ Initial routes:
 
 Pairing and feature-control routes will be added as v0.1 implementation progresses. The locked target remains JSON over HTTPS with mutual TLS.
 
+The first API slice provides these routes as an in-process router so behavior can be tested before choosing bind configuration. It does not hardcode a listening interface or port.
+
 ## Capability Detection
 
 Capability detection must inspect the running machine. It must not assume:

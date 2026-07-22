@@ -1,30 +1,10 @@
-use sw_agent::capability_detection::probe_vaapi_devices;
-use sw_core::{
-    HealthResponse, NodeCapabilities, ScreenCapabilities, ServiceStatus, VideoDecoderCapability,
-};
+use sw_agent::api::{AgentState, health_response};
+use sw_core::NodeUuid;
 
 fn main() {
-    let decoders = probe_vaapi_devices()
-        .into_iter()
-        .filter_map(|probe| probe.to_decoder_capability())
-        .collect::<Vec<VideoDecoderCapability>>();
-
-    let capabilities = NodeCapabilities {
-        node_name: "unconfigured-node".to_string(),
-        screen: ScreenCapabilities {
-            panel_modes: Vec::new(),
-            decoders,
-        },
-    };
-
-    let health = HealthResponse {
-        service: "sw-agent".to_string(),
-        status: if capabilities.screen.supports_h264_decode() {
-            ServiceStatus::Ready
-        } else {
-            ServiceStatus::Degraded
-        },
-    };
+    let node_uuid = NodeUuid::new("unconfigured-node").expect("static fallback is non-empty");
+    let state = AgentState::detect(node_uuid, "unconfigured-node".to_string());
+    let health = health_response(&state);
 
     println!(
         "{}",
