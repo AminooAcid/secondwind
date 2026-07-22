@@ -12,6 +12,7 @@ use sw_agent::{
     discovery::advertise_node,
     disk::{SharedDiskController, SystemdDiskController},
     identity::load_or_create_identity,
+    jobs::{DockerJobsController, SharedJobsController},
     pairing_state::{PairingState, runtime_pairing_offer},
     share::{SharedShareController, SystemdShareController},
     tls::agent_tls_config,
@@ -51,6 +52,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map(|controller| std::sync::Arc::new(controller) as SharedShareController);
     let usb_controller: Option<SharedUsbController> =
         Some(std::sync::Arc::new(SysUsbController) as SharedUsbController);
+    let jobs_controller: Option<SharedJobsController> = DockerJobsController::from_env()
+        .map(|controller| std::sync::Arc::new(controller) as SharedJobsController);
     let state =
         AgentState::detect_with_pairing(identity.node_uuid, identity.node_name.clone(), pairing)
             .with_identity_store(runtime.state_file.clone())
@@ -58,7 +61,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .with_disk_controller(disk_controller)
             .with_apps_controller(apps_controller)
             .with_share_controller(share_controller)
-            .with_usb_controller(usb_controller);
+            .with_usb_controller(usb_controller)
+            .with_jobs_controller(jobs_controller);
     state.sync_kiosk();
 
     if let Some(bind_addr) = runtime.bind_addr {

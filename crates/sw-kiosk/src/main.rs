@@ -47,7 +47,7 @@ fn run(config: &KioskRuntimeConfig) -> std::io::Result<()> {
 
     let mut supervisor = Supervisor::default();
     let mut client: Option<Child> = None;
-    let mut last_painted: Option<KioskState> = None;
+    let mut last_painted: Option<(KioskState, Option<screens::AmbientStats>)> = None;
     let mut last_failure_at: Option<Instant> = None;
 
     loop {
@@ -56,9 +56,15 @@ fn run(config: &KioskRuntimeConfig) -> std::io::Result<()> {
         match supervisor.decide(&state) {
             KioskAction::ShowScreen => {
                 stop_client(&mut client);
-                if last_painted.as_ref() != Some(&state) {
-                    paint(&mut stdout, &screens::render(&state))?;
-                    last_painted = Some(state.clone());
+                // Idle gets the ambient extras (clock + light stats).
+                let stats = match &state {
+                    KioskState::Idle { .. } => ambient_stats(),
+                    _ => None,
+                };
+                let key = (state.clone(), stats.clone());
+                if last_painted.as_ref() != Some(&key) {
+                    paint(&mut stdout, &screens::render_with_stats(&state, stats.as_ref()))?;
+                    last_painted = Some(key);
                 }
             }
             KioskAction::EnsureStreaming {
@@ -79,9 +85,10 @@ fn run(config: &KioskRuntimeConfig) -> std::io::Result<()> {
                     .unwrap_or(true);
 
                 if client.is_none() && backoff_over {
-                    if last_painted.as_ref() != Some(&state) {
+                    let key = (state.clone(), None);
+                    if last_painted.as_ref() != Some(&key) {
                         paint(&mut stdout, &screens::render(&state))?;
-                        last_painted = Some(state.clone());
+                        last_painted = Some(key);
                     }
 
                     if let Some(pin) = &pair_first {
@@ -128,6 +135,40 @@ fn run(config: &KioskRuntimeConfig) -> std::io::Result<()> {
     }
 
     Ok(())
+}
+
+/// Clock + memory line for the ambient idle screen, read from the running
+/// system. Minute resolution so repaints are rare.
+fn ambient_stats() -> Option<screens::AmbientStats> {
+    let clock = Command::new("date")
+        .arg("+%H:%M")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .unwrap_or_default();
+
+    let stats_line = std::fs::read_to_string("/proc/meminfo")
+        .ok()
+        .and_then(|meminfo| {
+            let field = |name: &str| {
+                meminfo
+                    .lines()
+                    .find(|line| line.starts_with(name))
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .and_then(|kb| kb.parse::<u64>().ok())
+            };
+            let total = field("MemTotal:")? / 1024;
+            let available = field("MemAvailable:")? / 1024;
+            Some(format!("Memory: {} MB used of {} MB", total - available, total))
+        })
+        .unwrap_or_default();
+
+    if clock.is_empty() && stats_line.is_empty() {
+        None
+    } else {
+        Some(screens::AmbientStats { clock, stats_line })
+    }
 }
 
 fn spawn(spec: &CommandSpec) -> std::io::Result<Child> {

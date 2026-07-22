@@ -17,10 +17,11 @@ use rustls::{
 use sw_core::{
     AppLaunchRequest, AppLaunchResponse, AppsStatusResponse, CapabilitiesResponse,
     CertificateMaterial, DiskCommandRequest, DiskStatusResponse, PairingRequest, PairingResponse,
-    ScreenCommandRequest, ScreenStatusResponse, ShareConfigRequest, ShareStatusResponse,
-    UsbCommandRequest, UsbDevicesResponse,
+    JobSubmitRequest, JobSubmitResponse, ScreenCommandRequest, ScreenStatusResponse,
+    ShareConfigRequest, ShareStatusResponse, UsbCommandRequest, UsbDevicesResponse,
     agent_api::{
-        APPS_PATH, CAPABILITIES_PATH, DISK_PATH, PAIRING_PATH, SCREEN_PATH, SHARE_PATH, USB_PATH,
+        APPS_PATH, CAPABILITIES_PATH, DISK_PATH, JOBS_PATH, PAIRING_PATH, SCREEN_PATH,
+        SHARE_PATH, USB_PATH,
     },
     certificate_der_from_pem, fingerprint_of_der,
 };
@@ -294,6 +295,14 @@ pub fn post_usb_command(
     request: &UsbCommandRequest,
 ) -> Result<UsbDevicesResponse, NodeClientError> {
     post_json(endpoint, client_identity, USB_PATH, request)
+}
+
+pub fn post_job_submit(
+    endpoint: &NodeEndpoint,
+    client_identity: Option<&CertificateMaterial>,
+    request: &JobSubmitRequest,
+) -> Result<JobSubmitResponse, NodeClientError> {
+    post_json(endpoint, client_identity, JOBS_PATH, request)
 }
 
 pub fn post_share_config(

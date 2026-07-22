@@ -14,7 +14,8 @@ if ! getent passwd secondwind >/dev/null; then
         --disabled-password secondwind
 fi
 
-for extra_group in render video input; do
+# docker group: the agent submits job containers (v0.5).
+for extra_group in render video input docker; do
     if getent group "$extra_group" >/dev/null; then
         adduser secondwind "$extra_group"
     fi

@@ -4,6 +4,7 @@ pub mod auto_connect;
 pub mod discovery;
 pub mod disk_control;
 pub mod host_state;
+pub mod jobs_cli;
 pub mod node_client;
 pub mod screen_control;
 pub mod usb_control;

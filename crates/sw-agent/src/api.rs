@@ -10,11 +10,12 @@ use sw_core::{
     CapabilitiesResponse, DiskAction, DiskCommandRequest, DiskState, DiskStatusResponse,
     HealthResponse, KioskState, NodeCapabilities, NodeUuid, PairingRequest, PairingResponse,
     PairingStatusResponse, ScreenAction, ScreenCapabilities, ScreenCommandRequest, ScreenState,
-    ScreenStatusResponse, ServiceStatus, ShareConfigRequest, ShareState, ShareStatusResponse,
-    UsbAction, UsbCommandRequest, UsbDevicesResponse, UsbState,
+    JobSubmitRequest, JobSubmitResponse, JobsStatusResponse, ScreenStatusResponse, ServiceStatus,
+    ShareConfigRequest, ShareState, ShareStatusResponse, UsbAction, UsbCommandRequest,
+    UsbDevicesResponse, UsbState,
     agent_api::{
-        APPS_PATH, CAPABILITIES_PATH, DISK_PATH, HEALTH_PATH, PAIRING_PATH, SCREEN_PATH,
-        SHARE_PATH, USB_PATH,
+        APPS_PATH, CAPABILITIES_PATH, DISK_PATH, HEALTH_PATH, JOBS_PATH, PAIRING_PATH,
+        SCREEN_PATH, SHARE_PATH, USB_PATH,
     },
     kiosk::write_kiosk_state,
 };
@@ -24,6 +25,7 @@ use crate::{
     capability_detection::probe_vaapi_devices,
     disk::{SharedDiskController, disk_state},
     identity::{PairedHostTrust, persist_paired_host},
+    jobs::SharedJobsController,
     pairing_state::{PairingState, unavailable_pairing},
     share::{SharedShareController, share_state},
     usb::SharedUsbController,
@@ -48,6 +50,8 @@ pub struct AgentState {
     pub share: Option<SharedShareController>,
     /// v0.4 USB export; None when the image has no usbip support.
     pub usb: Option<SharedUsbController>,
+    /// v0.5 job offload; None when the image has no Docker/presets.
+    pub jobs: Option<SharedJobsController>,
 }
 
 impl AgentState {
@@ -84,6 +88,7 @@ impl AgentState {
             apps: None,
             share: None,
             usb: None,
+            jobs: None,
         }
     }
 
@@ -104,6 +109,11 @@ impl AgentState {
 
     pub fn with_usb_controller(mut self, usb: Option<SharedUsbController>) -> Self {
         self.usb = usb;
+        self
+    }
+
+    pub fn with_jobs_controller(mut self, jobs: Option<SharedJobsController>) -> Self {
+        self.jobs = jobs;
         self
     }
 
@@ -207,6 +217,7 @@ pub fn router(state: AgentState) -> Router {
         .route(APPS_PATH, get(apps_status).post(launch_app))
         .route(SHARE_PATH, get(share_status).post(configure_share))
         .route(USB_PATH, get(usb_devices).post(usb_command))
+        .route(JOBS_PATH, get(jobs_status).post(submit_job))
         .with_state(state)
 }
 
@@ -286,6 +297,19 @@ pub async fn usb_command(
     Json(request): Json<UsbCommandRequest>,
 ) -> Json<UsbDevicesResponse> {
     Json(apply_usb_command(&state, request))
+}
+
+pub async fn jobs_status(
+    axum::extract::State(state): axum::extract::State<AgentState>,
+) -> Json<JobsStatusResponse> {
+    Json(jobs_status_response(&state))
+}
+
+pub async fn submit_job(
+    axum::extract::State(state): axum::extract::State<AgentState>,
+    Json(request): Json<JobSubmitRequest>,
+) -> Json<JobSubmitResponse> {
+    Json(apply_job_submit(&state, request))
 }
 
 pub async fn share_status(
@@ -644,6 +668,69 @@ pub fn apply_usb_command(state: &AgentState, request: UsbCommandRequest) -> UsbD
     }
 }
 
+pub fn jobs_status_response(state: &AgentState) -> JobsStatusResponse {
+    if !is_paired(state) {
+        return JobsStatusResponse {
+            jobs: Vec::new(),
+            message: Some("This node is not paired with a host yet.".to_string()),
+        };
+    }
+
+    match &state.jobs {
+        None => JobsStatusResponse {
+            jobs: Vec::new(),
+            message: Some("This node has no job runner configured.".to_string()),
+        },
+        Some(controller) => JobsStatusResponse {
+            jobs: controller.jobs(),
+            message: None,
+        },
+    }
+}
+
+pub fn apply_job_submit(state: &AgentState, request: JobSubmitRequest) -> JobSubmitResponse {
+    if !is_paired(state) {
+        return JobSubmitResponse {
+            accepted: false,
+            job_id: None,
+            message: Some("Pair with this node before running jobs.".to_string()),
+        };
+    }
+
+    let Some(controller) = &state.jobs else {
+        return JobSubmitResponse {
+            accepted: false,
+            job_id: None,
+            message: Some("This node has no job runner configured.".to_string()),
+        };
+    };
+
+    let Some(preset) = controller
+        .presets()
+        .into_iter()
+        .find(|preset| preset.preset_id == request.preset_id)
+    else {
+        return JobSubmitResponse {
+            accepted: false,
+            job_id: None,
+            message: Some("That job type is not on this node.".to_string()),
+        };
+    };
+
+    match controller.submit(&preset, &request.input) {
+        Ok(job_id) => JobSubmitResponse {
+            accepted: true,
+            job_id: Some(job_id),
+            message: None,
+        },
+        Err(error) => JobSubmitResponse {
+            accepted: false,
+            job_id: None,
+            message: Some(error.to_string()),
+        },
+    }
+}
+
 pub fn share_status_response(state: &AgentState) -> ShareStatusResponse {
     if !is_paired(state) {
         return ShareStatusResponse {
@@ -740,6 +827,7 @@ mod tests {
             apps: None,
             share: None,
             usb: None,
+            jobs: None,
         }
     }
 
@@ -1165,6 +1253,49 @@ mod tests {
             },
         );
         assert!(!unbound.devices[0].bound);
+    }
+
+    #[test]
+    fn job_submit_validates_preset_and_input() {
+        use crate::jobs::test_support::FakeJobsController;
+
+        let mut state = test_state(Vec::new())
+            .with_jobs_controller(Some(Arc::new(FakeJobsController::default())));
+        state.pairing = Arc::new(RwLock::new(PairingState::paired("host".to_string())));
+
+        let unknown = apply_job_submit(
+            &state,
+            sw_core::JobSubmitRequest {
+                preset_id: "not-a-preset".to_string(),
+                input: sw_core::JobInput::SharePath {
+                    path: "file.txt".to_string(),
+                },
+            },
+        );
+        assert!(!unknown.accepted);
+
+        let traversal = apply_job_submit(
+            &state,
+            sw_core::JobSubmitRequest {
+                preset_id: "compress".to_string(),
+                input: sw_core::JobInput::SharePath {
+                    path: "../etc/passwd".to_string(),
+                },
+            },
+        );
+        assert!(!traversal.accepted);
+
+        let accepted = apply_job_submit(
+            &state,
+            sw_core::JobSubmitRequest {
+                preset_id: "compress".to_string(),
+                input: sw_core::JobInput::SharePath {
+                    path: "Documents/report".to_string(),
+                },
+            },
+        );
+        assert!(accepted.accepted);
+        assert!(accepted.job_id.is_some());
     }
 
     #[test]

@@ -12,6 +12,30 @@ pub struct Screen {
     pub lines: Vec<String>,
 }
 
+/// Ambient extras for the paired idle screen (v0.5): a clock and light
+/// node stats, computed by the binary from the running system.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AmbientStats {
+    pub clock: String,
+    pub stats_line: String,
+}
+
+pub fn render_with_stats(state: &KioskState, stats: Option<&AmbientStats>) -> Screen {
+    let mut screen = render(state);
+
+    if let (KioskState::Idle { .. }, Some(stats)) = (state, stats) {
+        screen.lines.push(String::new());
+        if !stats.clock.is_empty() {
+            screen.lines.push(stats.clock.clone());
+        }
+        if !stats.stats_line.is_empty() {
+            screen.lines.push(stats.stats_line.clone());
+        }
+    }
+
+    screen
+}
+
 pub fn render(state: &KioskState) -> Screen {
     match state {
         KioskState::Starting => Screen {
@@ -151,6 +175,27 @@ mod tests {
         });
 
         assert!(screen.lines.join("\n").contains("My PC"));
+    }
+
+    #[test]
+    fn ambient_stats_appear_on_the_idle_screen_only() {
+        let stats = AmbientStats {
+            clock: "12:34".to_string(),
+            stats_line: "Memory: 312 MB used of 7900 MB".to_string(),
+        };
+
+        let idle = render_with_stats(
+            &KioskState::Idle {
+                node_name: "node".to_string(),
+                paired_host_name: "host".to_string(),
+            },
+            Some(&stats),
+        );
+        assert!(idle.lines.iter().any(|line| line == "12:34"));
+        assert!(idle.lines.iter().any(|line| line.contains("Memory")));
+
+        let starting = render_with_stats(&KioskState::Starting, Some(&stats));
+        assert!(!starting.lines.iter().any(|line| line == "12:34"));
     }
 
     #[test]

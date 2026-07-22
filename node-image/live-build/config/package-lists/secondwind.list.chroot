@@ -22,6 +22,9 @@ rsync
 usbip
 sudo
 
+# Jobs feature (v0.5): container runtime for job presets.
+docker.io
+
 # v1 app catalog (plan §6.4).
 firefox-esr
 chromium

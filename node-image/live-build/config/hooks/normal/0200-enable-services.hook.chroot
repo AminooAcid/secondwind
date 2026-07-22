@@ -18,4 +18,6 @@ systemctl enable sw-xpra-provision.service
 systemctl enable sw-xpra.service
 # USB: export daemon.
 systemctl enable secondwind-usbipd.service
+# Jobs: container runtime.
+systemctl enable docker.service
 systemctl set-default graphical.target

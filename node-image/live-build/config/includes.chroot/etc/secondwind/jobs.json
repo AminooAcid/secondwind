@@ -1,0 +1,23 @@
+[
+  {
+    "preset_id": "convert-video",
+    "display_name": "Convert to MP4 on node",
+    "image": "linuxserver/ffmpeg",
+    "command": ["-i", "{input}", "{input}.mp4"],
+    "accepts": "share_path"
+  },
+  {
+    "preset_id": "compress",
+    "display_name": "Compress on node",
+    "image": "alpine",
+    "command": ["tar", "-czf", "{input}.tar.gz", "-C", "/data", "{input_relative}"],
+    "accepts": "share_path"
+  },
+  {
+    "preset_id": "download",
+    "display_name": "Download on node",
+    "image": "curlimages/curl",
+    "command": ["-L", "--output-dir", "/data/Downloads", "--create-dirs", "-O", "{input}"],
+    "accepts": "url"
+  }
+]

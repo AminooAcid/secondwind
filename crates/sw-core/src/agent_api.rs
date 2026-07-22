@@ -6,6 +6,7 @@ pub const DISK_PATH: &str = "/v1/disk";
 pub const APPS_PATH: &str = "/v1/apps";
 pub const SHARE_PATH: &str = "/v1/share";
 pub const USB_PATH: &str = "/v1/usb";
+pub const JOBS_PATH: &str = "/v1/jobs";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentRoute {
@@ -17,6 +18,7 @@ pub enum AgentRoute {
     Apps,
     Share,
     Usb,
+    Jobs,
 }
 
 impl AgentRoute {
@@ -30,6 +32,7 @@ impl AgentRoute {
             Self::Apps => APPS_PATH,
             Self::Share => SHARE_PATH,
             Self::Usb => USB_PATH,
+            Self::Jobs => JOBS_PATH,
         }
     }
 }
@@ -49,6 +52,7 @@ mod tests {
             AgentRoute::Apps,
             AgentRoute::Share,
             AgentRoute::Usb,
+            AgentRoute::Jobs,
         ] {
             assert!(route.path().starts_with("/v1/"));
         }

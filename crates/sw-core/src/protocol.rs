@@ -219,6 +219,52 @@ pub struct UsbCommandRequest {
     pub action: UsbAction,
 }
 
+/// Job offload (v0.5): presets run in Docker on the node, operating
+/// directly on the shared folder — no copies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobSubmitRequest {
+    /// Preset identifier resolved against the node's own preset file.
+    pub preset_id: String,
+    pub input: JobInput,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum JobInput {
+    /// Path relative to the share root (validated: no `..`, not absolute).
+    SharePath { path: String },
+    /// http(s) URL for download presets.
+    Url { url: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobSubmitResponse {
+    pub accepted: bool,
+    pub job_id: Option<String>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobsStatusResponse {
+    pub jobs: Vec<JobInfo>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobInfo {
+    pub job_id: String,
+    pub preset_id: String,
+    pub state: JobState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobState {
+    Running,
+    Succeeded,
+    Failed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum UsbAction {

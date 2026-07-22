@@ -4,6 +4,7 @@ pub mod capability_detection;
 pub mod discovery;
 pub mod disk;
 pub mod identity;
+pub mod jobs;
 pub mod pairing_state;
 pub mod share;
 pub mod tls;
