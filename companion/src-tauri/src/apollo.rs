@@ -381,19 +381,28 @@ pub fn ensure_service_running() -> Result<(), ApolloError> {
     }
 
     for name in &names {
-        if service_query_running(name).unwrap_or(false) {
+        if service_state(name) == ServiceState::Running {
             return Ok(());
         }
     }
 
     for name in &names {
-        let started = Command::new("sc.exe")
-            .args(["start", name])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false);
-        if started || service_query_running(name).unwrap_or(false) {
-            return Ok(());
+        if service_state(name) == ServiceState::Unknown {
+            continue; // not this service name
+        }
+        let _ = Command::new("sc.exe").args(["start", name]).status();
+        // Wait for it to actually reach RUNNING before we use the API
+        // (a start returns during START_PENDING).
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
+            match service_state(name) {
+                ServiceState::Running => return Ok(()),
+                ServiceState::Stopped => {
+                    let _ = Command::new("sc.exe").args(["start", name]).status();
+                }
+                _ => {}
+            }
+            std::thread::sleep(Duration::from_millis(500));
         }
     }
 
@@ -557,7 +566,10 @@ impl std::fmt::Display for ApolloError {
                 write!(formatter, "the screen engine rejected the pairing code")
             }
             Self::Unauthorized => {
-                write!(formatter, "the screen engine rejected SecondWind's credentials")
+                write!(
+                    formatter,
+                    "the screen engine rejected SecondWind's credentials"
+                )
             }
             Self::ServiceUnavailable => {
                 write!(formatter, "the screen engine service could not be started")
