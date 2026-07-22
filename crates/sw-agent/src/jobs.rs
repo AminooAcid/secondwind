@@ -167,17 +167,29 @@ pub fn share_mountpoint() -> String {
 
 pub trait JobsController: Send + Sync + std::fmt::Debug {
     fn presets(&self) -> Vec<JobPreset>;
-    fn submit(&self, preset: &JobPreset, input: &JobInput) -> Result<String, JobsError>;
+    fn submit(
+        &self,
+        preset: &JobPreset,
+        input: &JobInput,
+        idempotency_key: Option<&str>,
+    ) -> Result<String, JobsError>;
     fn jobs(&self) -> Vec<JobInfo>;
 }
 
 pub type SharedJobsController = Arc<dyn JobsController>;
+
+pub const JOB_TIMEOUT_SECS_ENV: &str = "SECONDWIND_JOB_TIMEOUT_SECS";
+const DEFAULT_JOB_TIMEOUT_SECS: u64 = 3600;
+/// How often the background reaper sweeps.
+const REAPER_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[derive(Debug)]
 struct RunningJob {
     preset_id: String,
     child: Option<Child>,
     state: JobState,
+    started_at: std::time::Instant,
+    idempotency_key: Option<String>,
 }
 
 /// Finished jobs kept for status queries; older ones are evicted FIFO so
@@ -185,12 +197,23 @@ struct RunningJob {
 const MAX_FINISHED_JOBS: usize = 50;
 
 /// Production controller: presets from the node's file, jobs as `docker
-/// run` children reaped on every status call.
+/// run` children with timeout enforcement, reaped by the background
+/// sweeper and on every status call.
 #[derive(Debug)]
 pub struct DockerJobsController {
     presets_file: PathBuf,
     share_mountpoint: String,
+    timeout: std::time::Duration,
     jobs: Mutex<JobTable>,
+}
+
+impl DockerJobsController {
+    pub fn sweep(&self) {
+        self.jobs
+            .lock()
+            .expect("jobs lock")
+            .reap_and_prune(self.timeout);
+    }
 }
 
 #[derive(Debug, Default)]
@@ -201,13 +224,15 @@ struct JobTable {
 }
 
 impl JobTable {
-    /// Reaps finished children and evicts the oldest finished entries
-    /// beyond the cap.
-    fn reap_and_prune(&mut self) {
+    /// Reaps finished children, kills jobs past `timeout`, and evicts the
+    /// oldest finished entries beyond the cap.
+    fn reap_and_prune(&mut self, timeout: std::time::Duration) {
         for (job_id, job) in self.jobs.iter_mut() {
-            if let Some(child) = job.child.as_mut()
-                && let Ok(Some(status)) = child.try_wait()
-            {
+            let Some(child) = job.child.as_mut() else {
+                continue;
+            };
+
+            if let Ok(Some(status)) = child.try_wait() {
                 job.state = if status.success() {
                     JobState::Succeeded
                 } else {
@@ -215,6 +240,14 @@ impl JobTable {
                 };
                 job.child = None;
                 self.finished_order.push_back(job_id.clone());
+            } else if job.started_at.elapsed() >= timeout {
+                // Runaway job: kill it and record the failure.
+                let _ = child.kill();
+                let _ = child.wait();
+                job.state = JobState::Failed;
+                job.child = None;
+                self.finished_order.push_back(job_id.clone());
+                tracing::warn!(job = %job_id, preset = %job.preset_id, "job timed out");
             }
         }
 
@@ -224,6 +257,35 @@ impl JobTable {
             }
         }
     }
+
+    /// A still-known job with this idempotency key, if any.
+    fn job_id_for_key(&self, key: &str) -> Option<String> {
+        self.jobs
+            .iter()
+            .find(|(_, job)| job.idempotency_key.as_deref() == Some(key))
+            .map(|(job_id, _)| job_id.clone())
+    }
+}
+
+fn job_timeout() -> std::time::Duration {
+    let secs = std::env::var(JOB_TIMEOUT_SECS_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(DEFAULT_JOB_TIMEOUT_SECS);
+    std::time::Duration::from_secs(secs)
+}
+
+/// Background sweeper so zombies are reaped and timeouts enforced even
+/// when nobody polls `GET /v1/jobs`. Stops when the controller is dropped.
+pub fn spawn_reaper(controller: &Arc<DockerJobsController>) {
+    let weak = Arc::downgrade(controller);
+    std::thread::spawn(move || {
+        while let Some(controller) = weak.upgrade() {
+            controller.sweep();
+            drop(controller);
+            std::thread::sleep(REAPER_INTERVAL);
+        }
+    });
 }
 
 impl DockerJobsController {
@@ -235,6 +297,7 @@ impl DockerJobsController {
         Some(Self {
             presets_file,
             share_mountpoint: share_mountpoint(),
+            timeout: job_timeout(),
             jobs: Mutex::new(JobTable::default()),
         })
     }
@@ -251,8 +314,22 @@ impl JobsController for DockerJobsController {
         load_presets(&self.presets_file)
     }
 
-    fn submit(&self, preset: &JobPreset, input: &JobInput) -> Result<String, JobsError> {
+    fn submit(
+        &self,
+        preset: &JobPreset,
+        input: &JobInput,
+        idempotency_key: Option<&str>,
+    ) -> Result<String, JobsError> {
+        // Validate before taking the lock.
         let args = docker_args(preset, input, &self.share_mountpoint)?;
+
+        let mut table = self.jobs.lock().expect("jobs lock");
+        if let Some(key) = idempotency_key
+            && let Some(existing) = table.job_id_for_key(key)
+        {
+            return Ok(existing);
+        }
+
         let child = Command::new("docker")
             .args(&args)
             .stdin(Stdio::null())
@@ -262,12 +339,14 @@ impl JobsController for DockerJobsController {
             .map_err(|source| JobsError::Spawn { source })?;
 
         let job_id = Self::random_job_id()?;
-        self.jobs.lock().expect("jobs lock").jobs.insert(
+        table.jobs.insert(
             job_id.clone(),
             RunningJob {
                 preset_id: preset.preset_id.clone(),
                 child: Some(child),
                 state: JobState::Running,
+                started_at: std::time::Instant::now(),
+                idempotency_key: idempotency_key.map(|key| key.to_string()),
             },
         );
         Ok(job_id)
@@ -275,7 +354,7 @@ impl JobsController for DockerJobsController {
 
     fn jobs(&self) -> Vec<JobInfo> {
         let mut table = self.jobs.lock().expect("jobs lock");
-        table.reap_and_prune();
+        table.reap_and_prune(self.timeout);
         table
             .jobs
             .iter()
@@ -330,7 +409,12 @@ pub mod test_support {
             default_presets()
         }
 
-        fn submit(&self, preset: &JobPreset, input: &JobInput) -> Result<String, JobsError> {
+        fn submit(
+            &self,
+            preset: &JobPreset,
+            input: &JobInput,
+            _idempotency_key: Option<&str>,
+        ) -> Result<String, JobsError> {
             // Same validation path as production.
             docker_args(preset, input, "/mnt/share")?;
             self.submitted
@@ -423,26 +507,43 @@ mod tests {
         let mut table = JobTable::default();
         for index in 0..(MAX_FINISHED_JOBS + 10) {
             let job_id = format!("job-{index}");
-            table.jobs.insert(
-                job_id.clone(),
-                RunningJob {
-                    preset_id: "compress".to_string(),
-                    child: None,
-                    state: JobState::Succeeded,
-                },
-            );
+            table
+                .jobs
+                .insert(job_id.clone(), finished_job("compress", None));
             table.finished_order.push_back(job_id);
         }
 
-        table.reap_and_prune();
+        table.reap_and_prune(std::time::Duration::from_secs(3600));
 
         assert_eq!(table.jobs.len(), MAX_FINISHED_JOBS);
         // Oldest entries evicted first.
         assert!(!table.jobs.contains_key("job-0"));
-        assert!(table.jobs.contains_key(&format!(
-            "job-{}",
-            MAX_FINISHED_JOBS + 9
-        )));
+        assert!(
+            table
+                .jobs
+                .contains_key(&format!("job-{}", MAX_FINISHED_JOBS + 9))
+        );
+    }
+
+    fn finished_job(preset_id: &str, key: Option<&str>) -> RunningJob {
+        RunningJob {
+            preset_id: preset_id.to_string(),
+            child: None,
+            state: JobState::Succeeded,
+            started_at: std::time::Instant::now(),
+            idempotency_key: key.map(|key| key.to_string()),
+        }
+    }
+
+    #[test]
+    fn idempotency_key_finds_the_existing_job() {
+        let mut table = JobTable::default();
+        table
+            .jobs
+            .insert("job-a".to_string(), finished_job("compress", Some("key-1")));
+
+        assert_eq!(table.job_id_for_key("key-1").as_deref(), Some("job-a"));
+        assert!(table.job_id_for_key("key-2").is_none());
     }
 
     #[test]

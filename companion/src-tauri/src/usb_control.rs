@@ -57,7 +57,11 @@ pub fn parse_attached_port(
     product_id: &str,
 ) -> Option<u32> {
     let bus_needle = format!("/{bus_id}");
-    let id_needle = format!("({}:{})", vendor_id.to_lowercase(), product_id.to_lowercase());
+    let id_needle = format!(
+        "({}:{})",
+        vendor_id.to_lowercase(),
+        product_id.to_lowercase()
+    );
     let mut current_port: Option<u32> = None;
     let mut id_fallback: Option<u32> = None;
 
@@ -110,9 +114,7 @@ pub fn attach_device(
     let status = Command::new(usbip_client())
         .args(attach_args(node_address, bus_id))
         .status()
-        .map_err(|_| {
-            "SecondWind's USB client is missing from this installation.".to_string()
-        })?;
+        .map_err(|_| "SecondWind's USB client is missing from this installation.".to_string())?;
     if !status.success() {
         return Err(
             "The device could not be attached. If this is the first USB use, the SecondWind \
@@ -139,7 +141,9 @@ pub fn detach_device(
         .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
         .unwrap_or_default();
     if let Some(port) = parse_attached_port(&port_output, bus_id, vendor_id, product_id) {
-        let _ = Command::new(usbip_client()).args(detach_args(port)).status();
+        let _ = Command::new(usbip_client())
+            .args(detach_args(port))
+            .status();
     }
 
     node_client::post_usb_command(
@@ -189,16 +193,28 @@ Port 02: <Port in Use> at High Speed(480Mbps)
 
     #[test]
     fn parses_attached_port_by_exact_bus_id() {
-        assert_eq!(parse_attached_port(PORT_OUTPUT, "1-1", "0951", "1666"), Some(1));
-        assert_eq!(parse_attached_port(PORT_OUTPUT, "1-1.4", "046D", "C31C"), Some(0));
-        assert_eq!(parse_attached_port(PORT_OUTPUT, "9-9", "ffff", "0000"), None);
+        assert_eq!(
+            parse_attached_port(PORT_OUTPUT, "1-1", "0951", "1666"),
+            Some(1)
+        );
+        assert_eq!(
+            parse_attached_port(PORT_OUTPUT, "1-1.4", "046D", "C31C"),
+            Some(0)
+        );
+        assert_eq!(
+            parse_attached_port(PORT_OUTPUT, "9-9", "ffff", "0000"),
+            None
+        );
     }
 
     #[test]
     fn identical_devices_detach_the_right_port() {
         // Two flash drives with the same VID:PID on different bus ids
         // (BUG-014: VID:PID matching alone would always pick port 1).
-        assert_eq!(parse_attached_port(PORT_OUTPUT, "2-1", "0951", "1666"), Some(2));
+        assert_eq!(
+            parse_attached_port(PORT_OUTPUT, "2-1", "0951", "1666"),
+            Some(2)
+        );
     }
 
     #[test]

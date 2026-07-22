@@ -12,7 +12,7 @@ use sw_core::{NodeUuid, ScreenAction, ScreenCommandRequest, ScreenState, ScreenS
 use crate::{
     apollo,
     host_state::HostState,
-    node_client::{self, NodeEndpoint, NodeClientError},
+    node_client::{self, NodeClientError, NodeEndpoint},
 };
 
 #[derive(Debug)]
@@ -74,10 +74,9 @@ pub fn connect_screen(
     let stream_already_paired = node.screen.stream_paired;
 
     // 1. Screen engine up and configured, silently.
-    let installation =
-        apollo::detect_installation().ok_or(ScreenControlError::Apollo(
-            apollo::ApolloError::NotInstalled,
-        ))?;
+    let installation = apollo::detect_installation().ok_or(ScreenControlError::Apollo(
+        apollo::ApolloError::NotInstalled,
+    ))?;
     apollo::apply_managed_config(&installation, &state.config.host.display_name)
         .map_err(ScreenControlError::Apollo)?;
     apollo::ensure_service_running().map_err(ScreenControlError::Apollo)?;
@@ -89,13 +88,8 @@ pub fn connect_screen(
         let credentials = apollo::load_or_create_credentials(state_root, &installation)
             .map_err(ScreenControlError::Apollo)?;
         let pin = apollo::generate_stream_pair_pin().map_err(ScreenControlError::Apollo)?;
-        apollo::arm_stream_pair_pin(
-            &apollo::api_base(),
-            &credentials,
-            &pin,
-            &node_display_name,
-        )
-        .map_err(ScreenControlError::Apollo)?;
+        apollo::arm_stream_pair_pin(&apollo::api_base(), &credentials, &pin, &node_display_name)
+            .map_err(ScreenControlError::Apollo)?;
         Some(pin)
     };
 
@@ -105,12 +99,9 @@ pub fn connect_screen(
             stream_pair_pin: stream_pair_pin.clone(),
         },
     };
-    let response: ScreenStatusResponse = node_client::post_screen_command(
-        endpoint,
-        Some(&state.certificate),
-        &request,
-    )
-    .map_err(ScreenControlError::Node)?;
+    let response: ScreenStatusResponse =
+        node_client::post_screen_command(endpoint, Some(&state.certificate), &request)
+            .map_err(ScreenControlError::Node)?;
 
     match &response.screen {
         ScreenState::Streaming { .. } => {
@@ -159,18 +150,12 @@ mod tests {
     #[test]
     fn paired_endpoint_pins_stored_trust_not_discovery() {
         let (mut state, root) = temp_state("pins-trust");
-        let node_uuid =
-            NodeUuid::new("00000000-0000-4000-8000-000000000006").expect("valid uuid");
+        let node_uuid = NodeUuid::new("00000000-0000-4000-8000-000000000006").expect("valid uuid");
         state
-            .record_paired_node(
-                node_uuid,
-                "node".to_string(),
-                "sha256:trusted".to_string(),
-            )
+            .record_paired_node(node_uuid, "node".to_string(), "sha256:trusted".to_string())
             .expect("record");
 
-        let endpoint =
-            paired_endpoint(&state, &node_uuid, vec![], 49152).expect("paired endpoint");
+        let endpoint = paired_endpoint(&state, &node_uuid, vec![], 49152).expect("paired endpoint");
 
         assert_eq!(endpoint.certificate_fingerprint, "sha256:trusted");
         let _ = std::fs::remove_dir_all(&root);
@@ -179,8 +164,7 @@ mod tests {
     #[test]
     fn unpaired_node_cannot_get_screen_endpoint() {
         let (state, root) = temp_state("unpaired");
-        let node_uuid =
-            NodeUuid::new("00000000-0000-4000-8000-000000000007").expect("valid uuid");
+        let node_uuid = NodeUuid::new("00000000-0000-4000-8000-000000000007").expect("valid uuid");
 
         let error = paired_endpoint(&state, &node_uuid, vec![], 49152).expect_err("unpaired");
 

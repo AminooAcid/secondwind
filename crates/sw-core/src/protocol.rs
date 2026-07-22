@@ -8,6 +8,10 @@ pub const API_V1_PREFIX: &str = "/v1";
 pub struct HealthResponse {
     pub service: String,
     pub status: ServiceStatus,
+    /// Per-feature health so support can see *which* part is unhappy, not
+    /// just an overall Ready/Degraded. Defaulted for older peers.
+    #[serde(default)]
+    pub features: Vec<FeatureHealth>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,6 +19,23 @@ pub enum ServiceStatus {
     Starting,
     Ready,
     Degraded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FeatureHealth {
+    /// Stable feature slug: `screen`, `disk`, `apps`, `share`, `usb`, `jobs`.
+    pub feature: String,
+    pub state: FeatureState,
+    /// Short human-readable detail in SecondWind terms.
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeatureState {
+    Ok,
+    Degraded,
+    Unavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,7 +76,9 @@ pub enum ScreenAction {
     /// to the requesting host. `stream_pair_pin` is a one-shot PIN the host
     /// has armed on its streaming server, sent only while that inner pairing
     /// does not exist yet.
-    Connect { stream_pair_pin: Option<String> },
+    Connect {
+        stream_pair_pin: Option<String>,
+    },
     Disconnect,
 }
 
@@ -109,11 +132,15 @@ pub enum DiskState {
     NotPaired,
     /// The node has no designated data partition (or disk support is not
     /// configured on this image).
-    Unavailable { reason: String },
+    Unavailable {
+        reason: String,
+    },
     /// Configured but not currently exported.
     Ready,
     /// Exported and reachable at the returned target.
-    Exposed { target: DiskTarget },
+    Exposed {
+        target: DiskTarget,
+    },
 }
 
 /// Seamless-apps status (v0.3). The session endpoint's password only ever
@@ -226,6 +253,11 @@ pub struct JobSubmitRequest {
     /// Preset identifier resolved against the node's own preset file.
     pub preset_id: String,
     pub input: JobInput,
+    /// Optional client-supplied key: resubmitting the same key while that
+    /// job is still known returns the existing job instead of starting a
+    /// duplicate (double-clicked context menu, retried request).
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

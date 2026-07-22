@@ -52,9 +52,8 @@ impl PresenceTracker {
         let mut events = Vec::new();
 
         for node in seen {
-            match self.present.insert(*node, 0) {
-                None => events.push(PresenceEvent::Appeared(*node)),
-                Some(_) => {}
+            if self.present.insert(*node, 0).is_none() {
+                events.push(PresenceEvent::Appeared(*node))
             }
         }
 
@@ -98,14 +97,24 @@ pub struct NodeEventPayload {
 }
 
 /// Spawns the watcher thread. Runs for the lifetime of the companion.
-pub fn spawn(app: tauri::AppHandle, active_screens: ActiveScreens) {
+pub fn spawn(
+    app: tauri::AppHandle,
+    active_screens: ActiveScreens,
+    node_ops: crate::node_ops::SharedNodeOps,
+) {
     std::thread::spawn(move || {
         let mut tracker = PresenceTracker::default();
         // Last-known attached disk IQN per node, so a vanished node's
         // initiator session can still be flushed + detached locally.
         let mut attached_disks: HashMap<NodeUuid, String> = HashMap::new();
         loop {
-            scan_once(&app, &active_screens, &mut tracker, &mut attached_disks);
+            scan_once(
+                &app,
+                &active_screens,
+                &node_ops,
+                &mut tracker,
+                &mut attached_disks,
+            );
             std::thread::sleep(SCAN_INTERVAL);
         }
     });
@@ -114,17 +123,15 @@ pub fn spawn(app: tauri::AppHandle, active_screens: ActiveScreens) {
 fn scan_once(
     app: &tauri::AppHandle,
     active_screens: &ActiveScreens,
+    node_ops: &crate::node_ops::SharedNodeOps,
     tracker: &mut PresenceTracker,
     attached_disks: &mut HashMap<NodeUuid, String>,
 ) {
     use tauri::Emitter;
 
-    let discovered = match crate::discovery::discover_secondwind_nodes(SCAN_WINDOW) {
-        Ok(nodes) => nodes,
-        // Discovery hiccups (adapter changes) are normal; treat as empty
-        // scan so debounce absorbs them.
-        Err(_) => Vec::new(),
-    };
+    // Discovery hiccups (adapter changes) are normal; an empty scan lets
+    // the debounce absorb them.
+    let discovered = crate::discovery::discover_secondwind_nodes(SCAN_WINDOW).unwrap_or_default();
     let by_uuid: HashMap<NodeUuid, crate::discovery::DiscoveredNode> = discovered
         .into_iter()
         .map(|node| (node.node_uuid, node))
@@ -145,12 +152,14 @@ fn scan_once(
                     continue;
                 }
 
-                match auto_bring_up(app, node) {
+                // Bring-up runs inside the node's operation lock so it can
+                // never interleave with a manual toggle from the UI.
+                match node_ops.run(node_uuid, || auto_bring_up(app, node)) {
                     Ok(Some(outcome)) => {
-                        if outcome.screen_up {
-                            if let Ok(mut active) = active_screens.lock() {
-                                active.insert(node_uuid);
-                            }
+                        if outcome.screen_up
+                            && let Ok(mut active) = active_screens.lock()
+                        {
+                            active.insert(node_uuid);
                         }
                         if let Some(iqn) = outcome.disk_iqn {
                             attached_disks.insert(node_uuid, iqn);
@@ -180,9 +189,12 @@ fn scan_once(
             PresenceEvent::Vanished(node_uuid) => {
                 // Teardown in reverse feature order: flush + detach the disk
                 // first, then the screen (which has already ended with the
-                // link; we just update state and tell the user).
+                // link; we just update state and tell the user). Serialized
+                // per node like every other operation.
                 if let Some(iqn) = attached_disks.remove(&node_uuid) {
-                    let _ = crate::disk_control::detach_local(&iqn);
+                    node_ops.run(node_uuid, || {
+                        let _ = crate::disk_control::detach_local(&iqn);
+                    });
                 }
                 let was_active = active_screens
                     .lock()
@@ -278,17 +290,16 @@ fn auto_bring_up(
         .paired_node(&node.node_uuid)
         .map(|paired| paired.usb_auto_attach.clone())
         .unwrap_or_default();
-    if !rules.is_empty() {
-        if let Ok(devices) =
+    if !rules.is_empty()
+        && let Ok(devices) =
             crate::node_client::get_usb_devices(&endpoint, Some(&state.certificate))
-        {
-            for device in devices.devices {
-                let wanted = rules.iter().any(|rule| {
-                    rule.vendor_id == device.vendor_id && rule.product_id == device.product_id
-                });
-                if wanted && !device.bound {
-                    let _ = crate::usb_control::attach_device(&state, &endpoint, &device.bus_id);
-                }
+    {
+        for device in devices.devices {
+            let wanted = rules.iter().any(|rule| {
+                rule.vendor_id == device.vendor_id && rule.product_id == device.product_id
+            });
+            if wanted && !device.bound {
+                let _ = crate::usb_control::attach_device(&state, &endpoint, &device.bus_id);
             }
         }
     }
@@ -301,8 +312,7 @@ mod tests {
     use super::*;
 
     fn uuid(digit: char) -> NodeUuid {
-        NodeUuid::new(format!("00000000-0000-4000-8000-00000000000{digit}"))
-            .expect("valid uuid")
+        NodeUuid::new(format!("00000000-0000-4000-8000-00000000000{digit}")).expect("valid uuid")
     }
 
     #[test]

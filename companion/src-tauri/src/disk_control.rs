@@ -111,7 +111,10 @@ fn run_powershell(args: &[String]) -> Result<String, DiskControlError> {
 
 /// The scripts print a single JSON object; surface its message field.
 fn parse_script_message(stdout: &str) -> Option<String> {
-    let line = stdout.lines().rev().find(|line| line.trim().starts_with('{'))?;
+    let line = stdout
+        .lines()
+        .rev()
+        .find(|line| line.trim().starts_with('{'))?;
     let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
     value
         .get("message")
@@ -120,7 +123,10 @@ fn parse_script_message(stdout: &str) -> Option<String> {
 }
 
 pub fn parse_attached_drive_letter(stdout: &str) -> Option<char> {
-    let line = stdout.lines().rev().find(|line| line.trim().starts_with('{'))?;
+    let line = stdout
+        .lines()
+        .rev()
+        .find(|line| line.trim().starts_with('{'))?;
     let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
     value
         .get("drive_letter")
@@ -256,11 +262,20 @@ pub fn disconnect_disk(
 pub enum DiskControlError {
     NotPaired,
     Node(node_client::NodeClientError),
-    Unavailable { reason: String },
-    UnexpectedState { detail: String, message: Option<String> },
+    Unavailable {
+        reason: String,
+    },
+    UnexpectedState {
+        detail: String,
+        message: Option<String>,
+    },
     ScriptsMissing,
-    Script { source: std::io::Error },
-    ScriptFailed { detail: Option<String> },
+    Script {
+        source: std::io::Error,
+    },
+    ScriptFailed {
+        detail: Option<String>,
+    },
     NoAddresses,
 }
 

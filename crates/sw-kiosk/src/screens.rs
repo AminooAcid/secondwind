@@ -70,7 +70,10 @@ pub fn render(state: &KioskState) -> Screen {
                 lines.push(String::new());
             }
 
-            lines.push(format!("Security code: {}", short_fingerprint(certificate_fingerprint)));
+            lines.push(format!(
+                "Security code: {}",
+                short_fingerprint(certificate_fingerprint)
+            ));
             Screen { lines }
         }
         KioskState::Idle {
@@ -118,10 +121,7 @@ fn short_fingerprint(fingerprint: &str) -> String {
 
 fn qr_lines(payload: &str) -> Option<Vec<String>> {
     let code = QrCode::new(payload.as_bytes()).ok()?;
-    let rendered = code
-        .render::<unicode::Dense1x2>()
-        .quiet_zone(true)
-        .build();
+    let rendered = code.render::<unicode::Dense1x2>().quiet_zone(true).build();
     Some(rendered.lines().map(|line| line.to_string()).collect())
 }
 

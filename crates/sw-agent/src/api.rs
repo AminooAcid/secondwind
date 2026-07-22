@@ -6,16 +6,16 @@ use std::{
 
 use axum::{Json, Router, extract::ConnectInfo, routing::get};
 use sw_core::{
-    AppLaunchRequest, AppLaunchResponse, AppSessionState, AppsStatusResponse,
-    CapabilitiesResponse, DiskAction, DiskCommandRequest, DiskState, DiskStatusResponse,
-    HealthResponse, KioskState, NodeCapabilities, NodeUuid, PairingRequest, PairingResponse,
-    PairingStatusResponse, ScreenAction, ScreenCapabilities, ScreenCommandRequest, ScreenState,
-    JobSubmitRequest, JobSubmitResponse, JobsStatusResponse, ScreenStatusResponse, ServiceStatus,
+    AppLaunchRequest, AppLaunchResponse, AppSessionState, AppsStatusResponse, CapabilitiesResponse,
+    DiskAction, DiskCommandRequest, DiskState, DiskStatusResponse, HealthResponse,
+    JobSubmitRequest, JobSubmitResponse, JobsStatusResponse, KioskState, NodeCapabilities,
+    NodeUuid, PairingRequest, PairingResponse, PairingStatusResponse, ScreenAction,
+    ScreenCapabilities, ScreenCommandRequest, ScreenState, ScreenStatusResponse, ServiceStatus,
     ShareConfigRequest, ShareState, ShareStatusResponse, UsbAction, UsbCommandRequest,
     UsbDevicesResponse, UsbState,
     agent_api::{
-        APPS_PATH, CAPABILITIES_PATH, DISK_PATH, HEALTH_PATH, JOBS_PATH, PAIRING_PATH,
-        SCREEN_PATH, SHARE_PATH, USB_PATH,
+        APPS_PATH, CAPABILITIES_PATH, DISK_PATH, HEALTH_PATH, JOBS_PATH, PAIRING_PATH, SCREEN_PATH,
+        SHARE_PATH, USB_PATH,
     },
     kiosk::write_kiosk_state,
 };
@@ -76,7 +76,7 @@ impl AgentState {
             capabilities: NodeCapabilities {
                 node_name,
                 screen: ScreenCapabilities {
-                    panel_modes: Vec::new(),
+                    panel_modes: crate::capability_detection::detect_panel_modes(),
                     decoders,
                 },
                 network_interfaces: crate::capability_detection::detect_network_interfaces(),
@@ -140,7 +140,12 @@ impl AgentState {
 
         let kiosk_state = self.kiosk_projection();
         if let Err(error) = write_kiosk_state(kiosk_state_file, &kiosk_state) {
-            eprintln!("sw-agent: {error}");
+            tracing::warn!(
+                node = %self.node_uuid,
+                feature = "kiosk",
+                error = %error,
+                "failed to update the kiosk state file"
+            );
         }
     }
 
@@ -224,35 +229,46 @@ pub fn router(state: AgentState) -> Router {
         .with_state(state)
 }
 
+/// Every route body runs synchronous filesystem/subprocess work (vainfo,
+/// systemctl, docker, targetcli). `spawn_blocking` keeps slow commands off
+/// the async request threads.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Json<T> {
+    Json(
+        tokio::task::spawn_blocking(work)
+            .await
+            .expect("blocking handler task should not panic"),
+    )
+}
+
 pub async fn health(
     axum::extract::State(state): axum::extract::State<AgentState>,
 ) -> Json<HealthResponse> {
-    Json(health_response(&state))
+    blocking(move || health_response(&state)).await
 }
 
 pub async fn capabilities(
     axum::extract::State(state): axum::extract::State<AgentState>,
 ) -> Json<CapabilitiesResponse> {
-    Json(capabilities_response(&state))
+    blocking(move || capabilities_response(&state)).await
 }
 
 pub async fn pairing_status(
     axum::extract::State(state): axum::extract::State<AgentState>,
 ) -> Json<PairingStatusResponse> {
-    Json(pairing_status_response(&state))
+    blocking(move || pairing_status_response(&state)).await
 }
 
 pub async fn submit_pairing(
     axum::extract::State(state): axum::extract::State<AgentState>,
     Json(request): Json<PairingRequest>,
 ) -> Json<PairingResponse> {
-    Json(submit_pairing_request(&state, request))
+    blocking(move || submit_pairing_request(&state, request)).await
 }
 
 pub async fn screen_status(
     axum::extract::State(state): axum::extract::State<AgentState>,
 ) -> Json<ScreenStatusResponse> {
-    Json(screen_status_response(&state))
+    blocking(move || screen_status_response(&state)).await
 }
 
 pub async fn screen_command(
@@ -260,79 +276,183 @@ pub async fn screen_command(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(request): Json<ScreenCommandRequest>,
 ) -> Json<ScreenStatusResponse> {
-    Json(apply_screen_command(&state, peer.ip().to_string(), request))
+    blocking(move || apply_screen_command(&state, peer.ip().to_string(), request)).await
 }
 
 pub async fn disk_status(
     axum::extract::State(state): axum::extract::State<AgentState>,
 ) -> Json<DiskStatusResponse> {
-    Json(disk_status_response(&state))
+    blocking(move || disk_status_response(&state)).await
 }
 
 pub async fn disk_command(
     axum::extract::State(state): axum::extract::State<AgentState>,
     Json(request): Json<DiskCommandRequest>,
 ) -> Json<DiskStatusResponse> {
-    Json(apply_disk_command(&state, request))
+    blocking(move || apply_disk_command(&state, request)).await
 }
 
 pub async fn apps_status(
     axum::extract::State(state): axum::extract::State<AgentState>,
 ) -> Json<AppsStatusResponse> {
-    Json(apps_status_response(&state))
+    blocking(move || apps_status_response(&state)).await
 }
 
 pub async fn launch_app(
     axum::extract::State(state): axum::extract::State<AgentState>,
     Json(request): Json<AppLaunchRequest>,
 ) -> Json<AppLaunchResponse> {
-    Json(apply_app_launch(&state, request))
+    blocking(move || apply_app_launch(&state, request)).await
 }
 
 pub async fn usb_devices(
     axum::extract::State(state): axum::extract::State<AgentState>,
 ) -> Json<UsbDevicesResponse> {
-    Json(usb_devices_response(&state))
+    blocking(move || usb_devices_response(&state)).await
 }
 
 pub async fn usb_command(
     axum::extract::State(state): axum::extract::State<AgentState>,
     Json(request): Json<UsbCommandRequest>,
 ) -> Json<UsbDevicesResponse> {
-    Json(apply_usb_command(&state, request))
+    blocking(move || apply_usb_command(&state, request)).await
 }
 
 pub async fn jobs_status(
     axum::extract::State(state): axum::extract::State<AgentState>,
 ) -> Json<JobsStatusResponse> {
-    Json(jobs_status_response(&state))
+    blocking(move || jobs_status_response(&state)).await
 }
 
 pub async fn submit_job(
     axum::extract::State(state): axum::extract::State<AgentState>,
     Json(request): Json<JobSubmitRequest>,
 ) -> Json<JobSubmitResponse> {
-    Json(apply_job_submit(&state, request))
+    blocking(move || apply_job_submit(&state, request)).await
 }
 
 pub async fn share_status(
     axum::extract::State(state): axum::extract::State<AgentState>,
 ) -> Json<ShareStatusResponse> {
-    Json(share_status_response(&state))
+    blocking(move || share_status_response(&state)).await
 }
 
 pub async fn configure_share(
     axum::extract::State(state): axum::extract::State<AgentState>,
     Json(request): Json<ShareConfigRequest>,
 ) -> Json<ShareStatusResponse> {
-    Json(apply_share_config(&state, request))
+    blocking(move || apply_share_config(&state, request)).await
 }
 
 pub fn health_response(state: &AgentState) -> HealthResponse {
     HealthResponse {
         service: "sw-agent".to_string(),
         status: state.service_status(),
+        features: feature_health(state),
     }
+}
+
+/// Per-feature health, phrased in SecondWind terms (support-facing).
+pub fn feature_health(state: &AgentState) -> Vec<sw_core::FeatureHealth> {
+    use sw_core::{FeatureHealth, FeatureState};
+
+    let mut features = Vec::new();
+
+    features.push(if state.capabilities.screen.supports_h264_decode() {
+        FeatureHealth {
+            feature: "screen".to_string(),
+            state: FeatureState::Ok,
+            detail: None,
+        }
+    } else {
+        FeatureHealth {
+            feature: "screen".to_string(),
+            state: FeatureState::Degraded,
+            detail: Some("No hardware video decoding was detected.".to_string()),
+        }
+    });
+
+    features.push(match &state.disk {
+        Some(controller) if controller.provisioning().is_some() => FeatureHealth {
+            feature: "disk".to_string(),
+            state: FeatureState::Ok,
+            detail: None,
+        },
+        Some(_) => FeatureHealth {
+            feature: "disk".to_string(),
+            state: FeatureState::Unavailable,
+            detail: Some("No SecondWind data disk is set up on this node.".to_string()),
+        },
+        None => FeatureHealth {
+            feature: "disk".to_string(),
+            state: FeatureState::Unavailable,
+            detail: Some("Disk sharing is not configured on this image.".to_string()),
+        },
+    });
+
+    features.push(match &state.apps {
+        Some(controller) if controller.session_endpoint().is_some() => FeatureHealth {
+            feature: "apps".to_string(),
+            state: FeatureState::Ok,
+            detail: None,
+        },
+        Some(_) => FeatureHealth {
+            feature: "apps".to_string(),
+            state: FeatureState::Degraded,
+            detail: Some("The app session is not ready yet.".to_string()),
+        },
+        None => FeatureHealth {
+            feature: "apps".to_string(),
+            state: FeatureState::Unavailable,
+            detail: Some("Apps are not configured on this image.".to_string()),
+        },
+    });
+
+    features.push(match &state.share {
+        Some(controller) if controller.is_mounted() => FeatureHealth {
+            feature: "share".to_string(),
+            state: FeatureState::Ok,
+            detail: None,
+        },
+        Some(_) => FeatureHealth {
+            feature: "share".to_string(),
+            state: FeatureState::Degraded,
+            detail: Some("The host folder is not connected right now.".to_string()),
+        },
+        None => FeatureHealth {
+            feature: "share".to_string(),
+            state: FeatureState::Unavailable,
+            detail: Some("File sharing is not configured on this image.".to_string()),
+        },
+    });
+
+    features.push(match &state.usb {
+        Some(controller) if controller.available() => FeatureHealth {
+            feature: "usb".to_string(),
+            state: FeatureState::Ok,
+            detail: None,
+        },
+        _ => FeatureHealth {
+            feature: "usb".to_string(),
+            state: FeatureState::Unavailable,
+            detail: Some("USB sharing is not configured on this image.".to_string()),
+        },
+    });
+
+    features.push(match &state.jobs {
+        Some(_) => FeatureHealth {
+            feature: "jobs".to_string(),
+            state: FeatureState::Ok,
+            detail: None,
+        },
+        None => FeatureHealth {
+            feature: "jobs".to_string(),
+            state: FeatureState::Unavailable,
+            detail: Some("Job offload is not configured on this image.".to_string()),
+        },
+    });
+
+    features
 }
 
 pub fn capabilities_response(state: &AgentState) -> CapabilitiesResponse {
@@ -386,12 +506,12 @@ pub fn submit_pairing_request(state: &AgentState, request: PairingRequest) -> Pa
         && identity_store
             .persist_paired_host(paired_host.clone())
             .is_err()
-        {
-            return PairingResponse {
-                accepted: false,
-                node_certificate_fingerprint: result.response.node_certificate_fingerprint,
-            };
-        }
+    {
+        return PairingResponse {
+            accepted: false,
+            node_certificate_fingerprint: result.response.node_certificate_fingerprint,
+        };
+    }
 
     pairing.mark_paired(paired_host.host_name);
     drop(pairing);
@@ -737,7 +857,7 @@ pub fn apply_job_submit(state: &AgentState, request: JobSubmitRequest) -> JobSub
         };
     };
 
-    match controller.submit(&preset, &request.input) {
+    match controller.submit(&preset, &request.input, request.idempotency_key.as_deref()) {
         Ok(job_id) => JobSubmitResponse {
             accepted: true,
             job_id: Some(job_id),
@@ -990,6 +1110,7 @@ mod tests {
                     .expect("valid uuid"),
                 node_name: "node".to_string(),
                 paired_host: None,
+                node_certificate_fingerprint: None,
             },
         )
         .expect("write identity");
@@ -1043,10 +1164,8 @@ mod tests {
 
     #[test]
     fn screen_connect_streams_to_requesting_peer_and_updates_kiosk() {
-        let kiosk_file = std::env::temp_dir().join(format!(
-            "secondwind-api-kiosk-{}.json",
-            std::process::id()
-        ));
+        let kiosk_file =
+            std::env::temp_dir().join(format!("secondwind-api-kiosk-{}.json", std::process::id()));
         let _ = fs::remove_file(&kiosk_file);
         let mut state = test_state(Vec::new()).with_kiosk_state_file(Some(kiosk_file.clone()));
         state.pairing = Arc::new(RwLock::new(PairingState::paired("host".to_string())));
@@ -1150,12 +1269,11 @@ mod tests {
     fn disk_enable_exposes_target_with_chap_over_paired_channel() {
         use crate::disk::test_support::{FakeDiskController, provisioned};
 
-        let mut state = test_state(Vec::new()).with_disk_controller(Some(Arc::new(
-            FakeDiskController {
+        let mut state =
+            test_state(Vec::new()).with_disk_controller(Some(Arc::new(FakeDiskController {
                 provisioning: Some(provisioned()),
                 ..Default::default()
-            },
-        )));
+            })));
         state.pairing = Arc::new(RwLock::new(PairingState::paired("host".to_string())));
 
         assert_eq!(disk_status_response(&state).disk, sw_core::DiskState::Ready);
@@ -1185,16 +1303,15 @@ mod tests {
     fn apps_launch_rejects_unknown_and_uninstalled_apps() {
         use crate::apps::test_support::FakeAppsController;
 
-        let mut state = test_state(Vec::new()).with_apps_controller(Some(Arc::new(
-            FakeAppsController {
+        let mut state =
+            test_state(Vec::new()).with_apps_controller(Some(Arc::new(FakeAppsController {
                 endpoint: Some(sw_core::AppSessionEndpoint {
                     port: 14500,
                     password: "pass".to_string(),
                 }),
                 installed: vec!["vlc".to_string()],
                 ..Default::default()
-            },
-        )));
+            })));
         state.pairing = Arc::new(RwLock::new(PairingState::paired("host".to_string())));
 
         let unknown = apply_app_launch(
@@ -1326,6 +1443,7 @@ mod tests {
                 input: sw_core::JobInput::SharePath {
                     path: "file.txt".to_string(),
                 },
+                idempotency_key: None,
             },
         );
         assert!(!unknown.accepted);
@@ -1337,6 +1455,7 @@ mod tests {
                 input: sw_core::JobInput::SharePath {
                     path: "../etc/passwd".to_string(),
                 },
+                idempotency_key: None,
             },
         );
         assert!(!traversal.accepted);
@@ -1348,6 +1467,7 @@ mod tests {
                 input: sw_core::JobInput::SharePath {
                     path: "Documents/report".to_string(),
                 },
+                idempotency_key: None,
             },
         );
         assert!(accepted.accepted);

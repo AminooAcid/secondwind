@@ -4,7 +4,7 @@ use std::{
     process::Command,
 };
 
-use sw_core::{DecodeApi, NetworkInterface, VideoCodec, VideoDecoderCapability};
+use sw_core::{DecodeApi, NetworkInterface, PanelMode, VideoCodec, VideoDecoderCapability};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaApiProbe {
@@ -88,6 +88,83 @@ fn is_h264_decode_line(line: &str) -> bool {
 #[derive(Debug)]
 pub enum VaApiProbeError {
     Spawn(std::io::Error),
+}
+
+/// Detects connected panels' preferred modes from DRM connectors' EDID.
+/// Internal panels (eDP/LVDS/DSI) sort first — the node's own screen is
+/// what the virtual display should match. Nothing is assumed: no EDID, no
+/// modes.
+pub fn detect_panel_modes() -> Vec<PanelMode> {
+    panel_modes_in("/sys/class/drm")
+}
+
+pub fn panel_modes_in(drm_dir: impl AsRef<Path>) -> Vec<PanelMode> {
+    let Ok(entries) = fs::read_dir(drm_dir) else {
+        return Vec::new();
+    };
+
+    let mut connectors: Vec<(bool, String, PathBuf)> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_str()?.to_string();
+            // Connector dirs look like "card0-eDP-1"; skip bare devices.
+            if !name.contains('-') {
+                return None;
+            }
+            let path = entry.path();
+            let connected = fs::read_to_string(path.join("status"))
+                .map(|status| status.trim() == "connected")
+                .unwrap_or(false);
+            if !connected {
+                return None;
+            }
+            let internal = ["eDP", "LVDS", "DSI"]
+                .iter()
+                .any(|kind| name.contains(kind));
+            Some((internal, name, path))
+        })
+        .collect();
+    // Internal panels first, then stable by name.
+    connectors.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+
+    connectors
+        .into_iter()
+        .filter_map(|(_, _, path)| {
+            let edid = fs::read(path.join("edid")).ok()?;
+            parse_edid_preferred_mode(&edid)
+        })
+        .collect()
+}
+
+/// Parses the EDID's first detailed timing descriptor (the panel's
+/// preferred mode): resolution plus refresh derived from the pixel clock
+/// and total raster size.
+pub fn parse_edid_preferred_mode(edid: &[u8]) -> Option<PanelMode> {
+    const DTD_OFFSET: usize = 54;
+    let descriptor = edid.get(DTD_OFFSET..DTD_OFFSET + 18)?;
+
+    let pixel_clock_10khz = u16::from_le_bytes([descriptor[0], descriptor[1]]) as u64;
+    if pixel_clock_10khz == 0 {
+        return None;
+    }
+
+    let h_active = (((descriptor[4] as u32) >> 4) << 8) | descriptor[2] as u32;
+    let h_blank = (((descriptor[4] as u32) & 0x0F) << 8) | descriptor[3] as u32;
+    let v_active = (((descriptor[7] as u32) >> 4) << 8) | descriptor[5] as u32;
+    let v_blank = (((descriptor[7] as u32) & 0x0F) << 8) | descriptor[6] as u32;
+
+    let h_total = (h_active + h_blank) as u64;
+    let v_total = (v_active + v_blank) as u64;
+    if h_active == 0 || v_active == 0 || h_total == 0 || v_total == 0 {
+        return None;
+    }
+
+    let refresh_millihz = (pixel_clock_10khz * 10_000 * 1000 / (h_total * v_total)) as u32;
+    Some(PanelMode {
+        width_px: h_active,
+        height_px: v_active,
+        refresh_millihz,
+    })
 }
 
 /// Detects physical network interfaces (name + MAC) for Wake-on-LAN.
@@ -209,6 +286,61 @@ libva info: Trying to open /usr/lib/x86_64-linux-gnu/dri/i965_drv_video.so
                 root.path().join("renderD_beta")
             ]
         );
+    }
+
+    /// 1920x1080@60: 148.5 MHz pixel clock, 2200x1125 total raster.
+    fn edid_with_1080p_dtd() -> Vec<u8> {
+        let mut edid = vec![0_u8; 128];
+        let dtd = &mut edid[54..72];
+        dtd[0..2].copy_from_slice(&14850_u16.to_le_bytes()); // 148.50 MHz
+        dtd[2] = (1920 & 0xFF) as u8; // h active low
+        dtd[3] = (280 & 0xFF) as u8; // h blank low
+        dtd[4] = (((1920 >> 8) as u8) << 4) | ((280 >> 8) as u8);
+        dtd[5] = (1080 & 0xFF) as u8; // v active low
+        dtd[6] = 45; // v blank low
+        dtd[7] = ((1080_u16 >> 8) as u8) << 4;
+        edid
+    }
+
+    #[test]
+    fn edid_preferred_mode_parses_resolution_and_refresh() {
+        let mode = parse_edid_preferred_mode(&edid_with_1080p_dtd()).expect("mode");
+
+        assert_eq!(mode.width_px, 1920);
+        assert_eq!(mode.height_px, 1080);
+        // 148_500_000 / (2200 * 1125) = 60.0 Hz.
+        assert_eq!(mode.refresh_millihz, 60_000);
+    }
+
+    #[test]
+    fn truncated_or_zeroed_edid_yields_no_mode() {
+        assert!(parse_edid_preferred_mode(&[0_u8; 20]).is_none());
+        assert!(parse_edid_preferred_mode(&[0_u8; 128]).is_none());
+    }
+
+    #[test]
+    fn panel_scan_prefers_connected_internal_panels() {
+        let root = TempDirGuard::new("panel-modes");
+        let connector = |name: &str, status: &str, edid: Option<Vec<u8>>| {
+            let dir = root.path().join(name);
+            fs::create_dir_all(&dir).expect("connector dir");
+            fs::write(dir.join("status"), format!("{status}\n")).expect("status");
+            if let Some(edid) = edid {
+                fs::write(dir.join("edid"), edid).expect("edid");
+            }
+        };
+        connector("card0", "connected", None); // bare device dir: skipped
+        connector(
+            "card0-HDMI-A-1",
+            "disconnected",
+            Some(edid_with_1080p_dtd()),
+        );
+        connector("card0-eDP-1", "connected", Some(edid_with_1080p_dtd()));
+
+        let modes = panel_modes_in(root.path());
+
+        assert_eq!(modes.len(), 1);
+        assert_eq!(modes[0].width_px, 1920);
     }
 
     #[test]

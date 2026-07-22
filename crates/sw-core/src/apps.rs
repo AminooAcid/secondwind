@@ -108,7 +108,10 @@ mod tests {
                 .iter()
                 .find(|entry| entry.app_id == browser)
                 .expect("browser in catalog");
-            assert!(entry.synced_profile.is_some(), "{browser} must sync profile");
+            assert!(
+                entry.synced_profile.is_some(),
+                "{browser} must sync profile"
+            );
         }
     }
 

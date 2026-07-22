@@ -42,9 +42,10 @@ pub fn send_wake(mac_addresses: &[String]) -> usize {
     let mut sent = 0;
     for mac in mac_addresses {
         if let Some(bytes) = parse_mac(mac)
-            && socket.send_to(&magic_packet(bytes), target).is_ok() {
-                sent += 1;
-            }
+            && socket.send_to(&magic_packet(bytes), target).is_ok()
+        {
+            sent += 1;
+        }
     }
     sent
 }

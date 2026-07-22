@@ -221,7 +221,10 @@ mod tests {
             .iter()
             .find(|entry| entry.app_id == "firefox")
             .expect("firefox");
-        let vlc = catalog.iter().find(|entry| entry.app_id == "vlc").expect("vlc");
+        let vlc = catalog
+            .iter()
+            .find(|entry| entry.app_id == "vlc")
+            .expect("vlc");
 
         let firefox_command = wrapped_node_command(firefox);
         assert!(firefox_command.contains("secondwind-run-synced.sh"));

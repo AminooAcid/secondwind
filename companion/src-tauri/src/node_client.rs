@@ -16,12 +16,12 @@ use rustls::{
 };
 use sw_core::{
     AppLaunchRequest, AppLaunchResponse, AppsStatusResponse, CapabilitiesResponse,
-    CertificateMaterial, DiskCommandRequest, DiskStatusResponse, PairingRequest, PairingResponse,
-    JobSubmitRequest, JobSubmitResponse, ScreenCommandRequest, ScreenStatusResponse,
+    CertificateMaterial, DiskCommandRequest, DiskStatusResponse, JobSubmitRequest,
+    JobSubmitResponse, PairingRequest, PairingResponse, ScreenCommandRequest, ScreenStatusResponse,
     ShareConfigRequest, ShareStatusResponse, UsbCommandRequest, UsbDevicesResponse,
     agent_api::{
-        APPS_PATH, CAPABILITIES_PATH, DISK_PATH, JOBS_PATH, PAIRING_PATH, SCREEN_PATH,
-        SHARE_PATH, USB_PATH,
+        APPS_PATH, CAPABILITIES_PATH, DISK_PATH, JOBS_PATH, PAIRING_PATH, SCREEN_PATH, SHARE_PATH,
+        USB_PATH,
     },
     certificate_der_from_pem, fingerprint_of_der,
 };
@@ -44,8 +44,7 @@ impl PinnedFingerprintVerifier {
     }
 
     fn matches(&self, certificate: &CertificateDer<'_>) -> bool {
-        fingerprint_of_der(certificate.as_ref()).to_ascii_uppercase()
-            == self.expected_fingerprint
+        fingerprint_of_der(certificate.as_ref()).to_ascii_uppercase() == self.expected_fingerprint
     }
 }
 
@@ -324,8 +323,9 @@ pub fn submit_pairing(
 
     if response.accepted
         && !response.node_certificate_fingerprint.trim().is_empty()
-        && response.node_certificate_fingerprint.to_ascii_uppercase()
-            != endpoint.certificate_fingerprint.trim().to_ascii_uppercase()
+        && !response
+            .node_certificate_fingerprint
+            .eq_ignore_ascii_case(endpoint.certificate_fingerprint.trim())
     {
         return Err(NodeClientError::FingerprintMismatch);
     }
@@ -396,12 +396,9 @@ mod tests {
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&root);
-        let certificate = sw_core::load_or_create_certificate(
-            root.join("cert.pem"),
-            root.join("key.pem"),
-            name,
-        )
-        .expect("certificate");
+        let certificate =
+            sw_core::load_or_create_certificate(root.join("cert.pem"), root.join("key.pem"), name)
+                .expect("certificate");
         let _ = std::fs::remove_dir_all(&root);
         certificate
     }
@@ -412,7 +409,7 @@ mod tests {
 
         let config = pinned_client_config(&node.fingerprint, None).expect("pinned config");
 
-        assert!(config.client_auth_cert_resolver.has_certs() == false);
+        assert!(!config.client_auth_cert_resolver.has_certs());
     }
 
     #[test]
@@ -469,8 +466,8 @@ mod tests {
             certificate_fingerprint: "sha256:ABC".to_string(),
         };
 
-        let error = get_json::<serde_json::Value>(&endpoint, None, "/v1/health")
-            .expect_err("no addresses");
+        let error =
+            get_json::<serde_json::Value>(&endpoint, None, "/v1/health").expect_err("no addresses");
 
         assert!(matches!(error, NodeClientError::NoAddresses));
     }

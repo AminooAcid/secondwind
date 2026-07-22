@@ -115,9 +115,17 @@ fn write_certificate_files(
 ) -> Result<(), CertificateStoreError> {
     create_parent(certificate_file)?;
     create_parent(private_key_file)?;
-    write_atomic(certificate_file, certificate.certificate_pem.as_bytes(), false)?;
+    write_atomic(
+        certificate_file,
+        certificate.certificate_pem.as_bytes(),
+        false,
+    )?;
     // The private key is owner-only.
-    write_atomic(private_key_file, certificate.private_key_pem.as_bytes(), true)
+    write_atomic(
+        private_key_file,
+        certificate.private_key_pem.as_bytes(),
+        true,
+    )
 }
 
 /// Atomic write (temp file in the same directory + rename) so a crash never

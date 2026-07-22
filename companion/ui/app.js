@@ -236,14 +236,12 @@ async function launchApp(app, choiceOnNode) {
 
     switch (result.outcome) {
       case "on_node":
-        setStatus(`${app.display_name} is running on your node.`);
-        break;
       case "local":
-        setStatus(`${app.display_name} is running on this PC.`);
+        setStatus(result.explanation ?? `${app.display_name} is running.`);
         break;
       case "needs_choice":
         state.appPendingChoice.add(app.app_id);
-        setStatus(`Where should ${app.display_name} run?`);
+        setStatus(result.explanation ?? `Where should ${app.display_name} run?`);
         break;
       case "failed":
         setStatus(result.message ?? `${app.display_name} could not be started.`);

@@ -6,17 +6,25 @@ pub mod disk_control;
 pub mod host_state;
 pub mod jobs_cli;
 pub mod node_client;
+pub mod node_ops;
 pub mod screen_control;
 pub mod usb_control;
 
 pub fn run() {
     let active_screens = auto_connect::new_active_screens();
     let watcher_screens = active_screens.clone();
+    let node_ops = node_ops::new_shared();
+    let watcher_ops = node_ops.clone();
 
     tauri::Builder::default()
         .manage(active_screens)
+        .manage(node_ops)
         .setup(move |app| {
-            auto_connect::spawn(app.handle().clone(), watcher_screens.clone());
+            auto_connect::spawn(
+                app.handle().clone(),
+                watcher_screens.clone(),
+                watcher_ops.clone(),
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -45,10 +53,10 @@ pub(crate) mod commands_support {
     pub const STATE_DIR_ENV: &str = "SECONDWIND_COMPANION_STATE_DIR";
 
     pub fn state_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-        if let Ok(dir) = std::env::var(STATE_DIR_ENV) {
-            if !dir.trim().is_empty() {
-                return Ok(PathBuf::from(dir));
-            }
+        if let Ok(dir) = std::env::var(STATE_DIR_ENV)
+            && !dir.trim().is_empty()
+        {
+            return Ok(PathBuf::from(dir));
         }
 
         app.path()
@@ -56,9 +64,7 @@ pub(crate) mod commands_support {
             .map_err(|_| "SecondWind could not find a place to store its settings.".to_string())
     }
 
-    pub fn load_host_state(
-        app: &tauri::AppHandle,
-    ) -> Result<crate::host_state::HostState, String> {
+    pub fn load_host_state(app: &tauri::AppHandle) -> Result<crate::host_state::HostState, String> {
         crate::host_state::HostState::load_or_create(state_root(app)?)
             .map_err(|error| error.to_string())
     }
@@ -155,8 +161,7 @@ mod commands {
             .map_err(|error| error.to_string())?;
 
         // Learn wake targets right away (best-effort; mTLS is live now).
-        if let Ok(capabilities) =
-            node_client::get_capabilities(&endpoint, Some(&state.certificate))
+        if let Ok(capabilities) = node_client::get_capabilities(&endpoint, Some(&state.certificate))
         {
             let macs: Vec<String> = capabilities
                 .capabilities
@@ -187,6 +192,7 @@ mod commands {
     pub fn set_screen(
         app: tauri::AppHandle,
         screens: tauri::State<'_, ActiveScreens>,
+        ops: tauri::State<'_, crate::node_ops::SharedNodeOps>,
         node: DiscoveredNode,
         enabled: bool,
     ) -> Result<ScreenToggleResult, String> {
@@ -200,13 +206,15 @@ mod commands {
         )
         .map_err(|error| error.to_string())?;
 
-        let response = if enabled {
-            screen_control::connect_screen(&mut state, &state_root, &node.node_uuid, &endpoint)
-                .map_err(|error| error.to_string())?
-        } else {
-            screen_control::disconnect_screen(&state, &endpoint)
-                .map_err(|error| error.to_string())?
-        };
+        let response = ops.run(node.node_uuid, || {
+            if enabled {
+                screen_control::connect_screen(&mut state, &state_root, &node.node_uuid, &endpoint)
+                    .map_err(|error| error.to_string())
+            } else {
+                screen_control::disconnect_screen(&state, &endpoint)
+                    .map_err(|error| error.to_string())
+            }
+        })?;
 
         let streaming = matches!(response.screen, sw_core::ScreenState::Streaming { .. });
         if let Ok(mut active) = screens.lock() {
@@ -233,6 +241,7 @@ mod commands {
     #[tauri::command]
     pub fn set_disk(
         app: tauri::AppHandle,
+        ops: tauri::State<'_, crate::node_ops::SharedNodeOps>,
         node: DiscoveredNode,
         enabled: bool,
     ) -> Result<DiskToggleResult, String> {
@@ -245,23 +254,25 @@ mod commands {
         )
         .map_err(|error| error.to_string())?;
 
-        if enabled {
-            let outcome = disk_control::connect_disk(&state, &node.node_uuid, &endpoint)
-                .map_err(|error| error.to_string())?;
-            Ok(DiskToggleResult {
-                attached: true,
-                drive_letter: outcome.drive_letter,
-                message: None,
-            })
-        } else {
-            disk_control::disconnect_disk(&state, &endpoint, None)
-                .map_err(|error| error.to_string())?;
-            Ok(DiskToggleResult {
-                attached: false,
-                drive_letter: None,
-                message: None,
-            })
-        }
+        ops.run(node.node_uuid, || {
+            if enabled {
+                let outcome = disk_control::connect_disk(&state, &node.node_uuid, &endpoint)
+                    .map_err(|error| error.to_string())?;
+                Ok(DiskToggleResult {
+                    attached: true,
+                    drive_letter: outcome.drive_letter,
+                    message: None,
+                })
+            } else {
+                disk_control::disconnect_disk(&state, &endpoint, None)
+                    .map_err(|error| error.to_string())?;
+                Ok(DiskToggleResult {
+                    attached: false,
+                    drive_letter: None,
+                    message: None,
+                })
+            }
+        })
     }
 
     #[tauri::command]
@@ -296,10 +307,11 @@ mod commands {
     #[tauri::command]
     pub fn launch_app(
         app: tauri::AppHandle,
+        ops: tauri::State<'_, crate::node_ops::SharedNodeOps>,
         app_id: String,
         node: Option<DiscoveredNode>,
         choice_on_node: Option<bool>,
-    ) -> Result<app_control::LaunchOutcome, String> {
+    ) -> Result<LaunchResult, String> {
         let state_root = state_root(&app)?;
         let state = load_host_state(&app)?;
         let Some(entry) = state
@@ -333,18 +345,33 @@ mod commands {
             },
         };
 
-        let availability =
-            app_control::availability(&state, &node_uuid, endpoint.is_some());
+        let availability = app_control::availability(&state, &node_uuid, endpoint.is_some());
         let decision = app_control::resolve_decision(&entry, availability, choice_on_node);
+        let explanation = sw_launcher::explain(&entry, availability, &decision);
 
-        Ok(app_control::execute_decision(
-            &state,
-            &state_root,
-            &entry,
-            decision,
-            endpoint,
-            &node_uuid,
-        ))
+        let outcome = ops.run(node_uuid, || {
+            app_control::execute_decision(
+                &state,
+                &state_root,
+                &entry,
+                decision,
+                endpoint,
+                &node_uuid,
+            )
+        });
+
+        Ok(LaunchResult {
+            outcome,
+            explanation,
+        })
+    }
+
+    /// A launch outcome plus the plain-language reason for the decision.
+    #[derive(Debug, Clone, Serialize)]
+    pub struct LaunchResult {
+        #[serde(flatten)]
+        pub outcome: app_control::LaunchOutcome,
+        pub explanation: String,
     }
 
     fn paired_endpoint_for(
@@ -410,6 +437,7 @@ mod commands {
     #[tauri::command]
     pub fn set_usb_attached(
         app: tauri::AppHandle,
+        ops: tauri::State<'_, crate::node_ops::SharedNodeOps>,
         node: DiscoveredNode,
         bus_id: String,
         vendor_id: String,
@@ -419,11 +447,13 @@ mod commands {
         let state = load_host_state(&app)?;
         let endpoint = paired_endpoint_for(&state, &node)?;
 
-        if attached {
-            usb_control::attach_device(&state, &endpoint, &bus_id).map(|_| ())
-        } else {
-            usb_control::detach_device(&state, &endpoint, &bus_id, &vendor_id, &product_id)
-        }
+        ops.run(node.node_uuid, || {
+            if attached {
+                usb_control::attach_device(&state, &endpoint, &bus_id).map(|_| ())
+            } else {
+                usb_control::detach_device(&state, &endpoint, &bus_id, &vendor_id, &product_id)
+            }
+        })
     }
 
     #[tauri::command]
@@ -456,7 +486,7 @@ mod commands {
 
         #[test]
         fn discovery_window_is_short_enough_for_refresh_ui() {
-            assert!(DISCOVERY_BROWSE_WINDOW_MS <= 1_000);
+            const { assert!(DISCOVERY_BROWSE_WINDOW_MS <= 1_000) }
         }
     }
 }

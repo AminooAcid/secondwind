@@ -3,6 +3,34 @@
 All notable changes to SecondWind. Format loosely follows Keep a Changelog;
 versions are tagged only after their phase acceptance passes on hardware.
 
+## [Unreleased — architecture-review response]
+
+### Added
+- Per-node operation serialization in the companion: UI toggles,
+  auto-connect, app launches, and USB actions on the same node can no
+  longer interleave (first slice of a future reconciliation engine).
+- Panel-mode detection on the node: DRM connector scan + EDID
+  preferred-mode parsing (resolution and refresh), internal panels first —
+  fills the v0.1 "match the node panel" spec gap.
+- Plain-language explanations for every app-launch decision.
+- Structured `tracing` in the agent (`SECONDWIND_LOG`) and per-feature
+  health in `GET /v1/health` (screen/disk/apps/share/usb/jobs).
+- Job runner: enforced timeouts, background reaper, idempotency keys
+  (context menu resubmits no longer start duplicate containers).
+- BUG-005 resolved: a regenerated certificate store under an established
+  pairing now resets trust explicitly (re-pair) instead of silently
+  breaking mTLS.
+- Agent routes moved onto `spawn_blocking` so slow systemctl/docker/USB
+  commands never occupy request threads.
+- CI: `cargo fmt --check`, `clippy -D warnings` on both workspaces,
+  RustSec audit, ShellCheck, PSScriptAnalyzer.
+
+### Changed
+- Deferred-not-rejected review items recorded in `docs/BACKLOG.md`
+  (reconciliation engine, SQLite jobs, DPAPI, api.rs split, TS bindings);
+  adaptive-streaming engine and placement scoring rejected with reasons
+  in `docs/DECISIONS.md`.
+
 ## [Unreleased — audit fixes, round 2]
 
 ### Fixed

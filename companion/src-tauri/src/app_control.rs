@@ -19,8 +19,9 @@ use sw_core::{
     AppLaunchRequest, AppSessionState, AppsStatusResponse, ShareConfigRequest,
     apps::AppCatalogEntry,
 };
-use sw_launcher::{LaunchDecision, NodeAvailability, attach_spec, decide, decide_after_ask,
-    send_wake};
+use sw_launcher::{
+    LaunchDecision, NodeAvailability, attach_spec, decide, decide_after_ask, send_wake,
+};
 
 use crate::{
     host_state::HostState,
@@ -44,7 +45,9 @@ pub enum LaunchOutcome {
     Local,
     /// Policy says ask; the UI shows the choice and calls back with it.
     NeedsChoice,
-    Failed { message: String },
+    Failed {
+        message: String,
+    },
 }
 
 /// Host-side share credentials (dedicated account, random password).
@@ -60,10 +63,10 @@ pub struct ShareCredentials {
 /// the elevated setup script (UAC prompt on first use).
 pub fn ensure_host_share(state_root: &Path) -> Result<ShareCredentials, String> {
     let credentials_file = state_root.join(SHARE_CREDENTIALS_FILE);
-    if let Ok(contents) = fs::read_to_string(&credentials_file) {
-        if let Ok(credentials) = serde_json::from_str::<ShareCredentials>(&contents) {
-            return Ok(credentials);
-        }
+    if let Ok(contents) = fs::read_to_string(&credentials_file)
+        && let Ok(credentials) = serde_json::from_str::<ShareCredentials>(&contents)
+    {
+        return Ok(credentials);
     }
 
     let folder = default_share_folder()?;
@@ -114,12 +117,8 @@ fn run_share_setup_elevated(
 
     fs::create_dir_all(state_root).map_err(|error| error.to_string())?;
     let password_file = state_root.join("share-setup.pass");
-    sw_core::certificates::write_atomic(
-        &password_file,
-        credentials.password.as_bytes(),
-        true,
-    )
-    .map_err(|_| "SecondWind could not prepare the share setup.".to_string())?;
+    sw_core::certificates::write_atomic(&password_file, credentials.password.as_bytes(), true)
+        .map_err(|_| "SecondWind could not prepare the share setup.".to_string())?;
 
     let quote = |value: &str| value.replace('\'', "''");
     let inner = format!(
@@ -284,14 +283,13 @@ fn wait_for_node(node_uuid: &sw_core::NodeUuid) -> Option<NodeEndpoint> {
     let deadline = Instant::now() + WAKE_TIMEOUT;
     while Instant::now() < deadline {
         if let Ok(nodes) = crate::discovery::discover_secondwind_nodes(Duration::from_millis(1200))
+            && let Some(node) = nodes.into_iter().find(|node| node.node_uuid == *node_uuid)
         {
-            if let Some(node) = nodes.into_iter().find(|node| node.node_uuid == *node_uuid) {
-                return Some(NodeEndpoint {
-                    addresses: node.addresses,
-                    api_port: node.api_port,
-                    certificate_fingerprint: node.node_certificate_fingerprint,
-                });
-            }
+            return Some(NodeEndpoint {
+                addresses: node.addresses,
+                api_port: node.api_port,
+                certificate_fingerprint: node.node_certificate_fingerprint,
+            });
         }
         std::thread::sleep(WAKE_POLL);
     }
@@ -346,15 +344,18 @@ fn launch_on_node(
             message: "SecondWind could not prepare the app session.".to_string(),
         };
     }
-    let client =
-        std::env::var(XPRA_CLIENT_ENV).unwrap_or_else(|_| DEFAULT_XPRA_CLIENT.to_string());
+    let client = std::env::var(XPRA_CLIENT_ENV).unwrap_or_else(|_| DEFAULT_XPRA_CLIENT.to_string());
     let spec = attach_spec(
         &client,
         node_address,
         session.port,
         &password_file.to_string_lossy(),
     );
-    if Command::new(&spec.program).args(&spec.args).spawn().is_err() {
+    if Command::new(&spec.program)
+        .args(&spec.args)
+        .spawn()
+        .is_err()
+    {
         return LaunchOutcome::Failed {
             message: "SecondWind's window client is missing from this installation.".to_string(),
         };
@@ -416,8 +417,8 @@ mod tests {
 
     #[test]
     fn local_address_toward_loopback_is_loopback() {
-        let address = local_address_toward(&"127.0.0.1".parse().expect("ip"))
-            .expect("local address");
+        let address =
+            local_address_toward(&"127.0.0.1".parse().expect("ip")).expect("local address");
 
         assert!(address.is_loopback());
     }

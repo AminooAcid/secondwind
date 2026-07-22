@@ -32,10 +32,10 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn state_dir() -> Result<PathBuf, String> {
-    if let Ok(dir) = std::env::var("SECONDWIND_COMPANION_STATE_DIR") {
-        if !dir.trim().is_empty() {
-            return Ok(PathBuf::from(dir));
-        }
+    if let Ok(dir) = std::env::var("SECONDWIND_COMPANION_STATE_DIR")
+        && !dir.trim().is_empty()
+    {
+        return Ok(PathBuf::from(dir));
     }
     // Same location Tauri's app_data_dir resolves to for this app id.
     std::env::var_os("APPDATA")
@@ -49,8 +49,7 @@ fn run_inner(args: &[String]) -> Result<String, String> {
     };
 
     let state_root = state_dir()?;
-    let state =
-        HostState::load_or_create(&state_root).map_err(|error| error.to_string())?;
+    let state = HostState::load_or_create(&state_root).map_err(|error| error.to_string())?;
 
     let input = if raw_input.starts_with("http://") || raw_input.starts_with("https://") {
         JobInput::Url {
@@ -81,12 +80,16 @@ fn run_inner(args: &[String]) -> Result<String, String> {
         certificate_fingerprint: trusted_fingerprint,
     };
 
+    // Same preset + same input = same job: a double-clicked context menu
+    // entry or a retried request never starts a duplicate container.
+    let idempotency_key = Some(format!("{preset_id}:{raw_input}"));
     let response = node_client::post_job_submit(
         &endpoint,
         Some(&state.certificate),
         &JobSubmitRequest {
             preset_id: preset_id.clone(),
             input,
+            idempotency_key,
         },
     )
     .map_err(|error| error.to_string())?;
@@ -106,7 +109,7 @@ fn run_inner(args: &[String]) -> Result<String, String> {
 
 /// Maps an absolute Windows path to a share-relative path, requiring it to
 /// live inside the SecondWind shared folder.
-fn share_relative_path(state_root: &PathBuf, raw_input: &str) -> Result<String, String> {
+fn share_relative_path(state_root: &std::path::Path, raw_input: &str) -> Result<String, String> {
     let credentials_file = state_root.join(app_control::SHARE_CREDENTIALS_FILE);
     let contents = std::fs::read_to_string(&credentials_file).map_err(|_| {
         "the SecondWind folder is not set up yet — open SecondWind and launch an app on the \
@@ -164,11 +167,17 @@ mod tests {
     #[test]
     fn relative_inside_accepts_children_only() {
         assert_eq!(
-            relative_inside(r"C:\Users\Me\SecondWind", r"C:\Users\Me\SecondWind\Videos\a.mkv"),
+            relative_inside(
+                r"C:\Users\Me\SecondWind",
+                r"C:\Users\Me\SecondWind\Videos\a.mkv"
+            ),
             Some("Videos/a.mkv".to_string())
         );
         assert_eq!(
-            relative_inside(r"C:\Users\Me\SecondWind\", r"c:\users\me\secondwind\file.txt"),
+            relative_inside(
+                r"C:\Users\Me\SecondWind\",
+                r"c:\users\me\secondwind\file.txt"
+            ),
             Some("file.txt".to_string())
         );
         assert_eq!(
@@ -184,7 +193,10 @@ mod tests {
     #[test]
     fn relative_inside_preserves_input_casing() {
         assert_eq!(
-            relative_inside(r"c:\users\me\secondwind", r"C:\Users\Me\SecondWind\Videos\A.MKV"),
+            relative_inside(
+                r"c:\users\me\secondwind",
+                r"C:\Users\Me\SecondWind\Videos\A.MKV"
+            ),
             Some("Videos/A.MKV".to_string())
         );
     }
@@ -194,17 +206,26 @@ mod tests {
         // Non-ASCII case-changing chars must not panic (BUG-011: the old
         // byte-arithmetic version could slice mid-character).
         assert_eq!(
-            relative_inside(r"C:\Users\İbrahim\SecondWind", r"C:\Users\İbrahim\SecondWind\straße.txt"),
+            relative_inside(
+                r"C:\Users\İbrahim\SecondWind",
+                r"C:\Users\İbrahim\SecondWind\straße.txt"
+            ),
             Some("straße.txt".to_string())
         );
         // Trailing separators on the input must not corrupt the result.
         assert_eq!(
-            relative_inside(r"C:\Users\Me\SecondWind", "C:\\Users\\Me\\SecondWind\\dir\\"),
+            relative_inside(
+                r"C:\Users\Me\SecondWind",
+                "C:\\Users\\Me\\SecondWind\\dir\\"
+            ),
             Some("dir".to_string())
         );
         // A sibling folder that merely starts with the root's name.
         assert_eq!(
-            relative_inside(r"C:\Users\Me\SecondWind", r"C:\Users\Me\SecondWindOther\f.txt"),
+            relative_inside(
+                r"C:\Users\Me\SecondWind",
+                r"C:\Users\Me\SecondWindOther\f.txt"
+            ),
             None
         );
     }

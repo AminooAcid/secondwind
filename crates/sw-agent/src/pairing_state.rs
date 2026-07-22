@@ -50,9 +50,7 @@ impl PairingState {
     /// own screen only.
     pub fn kiosk_display(&self) -> Option<(PairingOffer, PairingQrPayload)> {
         match self {
-            Self::Waiting { offer } => {
-                Some((offer.clone(), PairingQrPayload::from_offer(offer)))
-            }
+            Self::Waiting { offer } => Some((offer.clone(), PairingQrPayload::from_offer(offer))),
             _ => None,
         }
     }

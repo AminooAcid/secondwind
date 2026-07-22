@@ -29,13 +29,39 @@ const DEFAULT_NODE_NAME: &str = "SecondWind node";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // Structured logs; level via SECONDWIND_LOG (RUST_LOG syntax), default
+    // info. Journald picks these up on the node image.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_env("SECONDWIND_LOG")
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     let runtime = AgentRuntimeConfig::from_env()?;
-    let identity = load_or_create_identity(&runtime.state_file, runtime.node_name)?;
+    let mut identity = load_or_create_identity(&runtime.state_file, runtime.node_name)?;
     let certificate = load_or_create_certificate(
         &runtime.certificate_file,
         &runtime.private_key_file,
         identity.node_uuid.to_string(),
     )?;
+
+    // A regenerated certificate store under an established pairing is an
+    // intentional trust reset — back to the pairing screen, loudly — never
+    // a silently broken fingerprint (BUG-005).
+    match sw_agent::identity::reconcile_certificate(&mut identity, &certificate.fingerprint) {
+        sw_agent::identity::CertificateReconciliation::Unchanged => {}
+        sw_agent::identity::CertificateReconciliation::Recorded => {
+            sw_agent::identity::write_identity(&runtime.state_file, &identity)?;
+        }
+        sw_agent::identity::CertificateReconciliation::TrustReset => {
+            tracing::warn!(
+                node = %identity.node_uuid,
+                "node certificate changed; pairing trust was reset — the host must pair again"
+            );
+            sw_agent::identity::write_identity(&runtime.state_file, &identity)?;
+        }
+    }
     let pairing = match &identity.paired_host {
         Some(paired_host) => PairingState::paired(paired_host.host_name.clone()),
         None => runtime_pairing_offer(
@@ -52,8 +78,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map(|controller| std::sync::Arc::new(controller) as SharedShareController);
     let usb_controller: Option<SharedUsbController> =
         Some(std::sync::Arc::new(SysUsbController) as SharedUsbController);
-    let jobs_controller: Option<SharedJobsController> = DockerJobsController::from_env()
-        .map(|controller| std::sync::Arc::new(controller) as SharedJobsController);
+    let jobs_controller: Option<SharedJobsController> =
+        DockerJobsController::from_env().map(|controller| {
+            let controller = std::sync::Arc::new(controller);
+            // Timeouts and zombie reaping run even if nobody polls.
+            sw_agent::jobs::spawn_reaper(&controller);
+            controller as SharedJobsController
+        });
     let state =
         AgentState::detect_with_pairing(identity.node_uuid, identity.node_name.clone(), pairing)
             .with_identity_store(runtime.state_file.clone())
@@ -75,11 +106,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
             &certificate.fingerprint,
             advertised_port,
         )?;
+        tracing::info!(
+            node = %identity.node_uuid,
+            port = advertised_port,
+            paired = identity.paired_host.is_some(),
+            "sw-agent serving"
+        );
         axum_server::from_tcp_rustls(listener, tls_config)?
-            .serve(
-                router(state)
-                    .into_make_service_with_connect_info::<std::net::SocketAddr>(),
-            )
+            .serve(router(state).into_make_service_with_connect_info::<std::net::SocketAddr>())
             .await?;
     } else {
         let health = health_response(&state);

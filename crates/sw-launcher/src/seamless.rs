@@ -58,17 +58,15 @@ mod tests {
         assert_eq!(spec.program, "xpra");
         assert_eq!(spec.args[0], "attach");
         assert_eq!(spec.args[1], "tcp://10.0.0.7:14500/");
-        assert!(spec.args.contains(&"--password-file=C:/tmp/pass".to_string()));
+        assert!(
+            spec.args
+                .contains(&"--password-file=C:/tmp/pass".to_string())
+        );
     }
 
     #[test]
     fn ipv6_addresses_are_bracketed() {
-        let spec = attach_spec(
-            "xpra",
-            &"::1".parse().expect("ipv6"),
-            14500,
-            "/tmp/pass",
-        );
+        let spec = attach_spec("xpra", &"::1".parse().expect("ipv6"), 14500, "/tmp/pass");
 
         assert_eq!(spec.args[1], "tcp://[::1]:14500/");
     }

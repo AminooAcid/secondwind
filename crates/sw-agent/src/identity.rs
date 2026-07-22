@@ -12,6 +12,12 @@ pub struct AgentIdentity {
     pub node_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paired_host: Option<PairedHostTrust>,
+    /// The node's own certificate fingerprint at the time trust was
+    /// established. Lets startup detect a regenerated certificate store
+    /// and reset pairing *intentionally* instead of silently breaking
+    /// mTLS with a stale fingerprint (BUG-005).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_certificate_fingerprint: Option<String>,
 }
 
 impl AgentIdentity {
@@ -20,6 +26,46 @@ impl AgentIdentity {
             node_uuid: NodeUuid::new_v4(),
             node_name,
             paired_host: None,
+            node_certificate_fingerprint: None,
+        }
+    }
+}
+
+/// Outcome of matching the stored fingerprint against the live cert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CertificateReconciliation {
+    /// Fingerprint unchanged — nothing to do.
+    Unchanged,
+    /// First run (or pre-upgrade identity): fingerprint recorded.
+    Recorded,
+    /// The certificate changed under an established pairing: trust was
+    /// cleared, the node returns to the pairing screen, and the host must
+    /// re-pair. Never silent.
+    TrustReset,
+}
+
+/// Reconciles the identity with the certificate the agent actually loaded.
+/// Mutates `identity` (fingerprint always brought current; `paired_host`
+/// cleared on a reset); the caller persists when the result is not
+/// `Unchanged`.
+pub fn reconcile_certificate(
+    identity: &mut AgentIdentity,
+    current_fingerprint: &str,
+) -> CertificateReconciliation {
+    match identity.node_certificate_fingerprint.as_deref() {
+        Some(stored) if stored == current_fingerprint => CertificateReconciliation::Unchanged,
+        Some(_) => {
+            let was_paired = identity.paired_host.take().is_some();
+            identity.node_certificate_fingerprint = Some(current_fingerprint.to_string());
+            if was_paired {
+                CertificateReconciliation::TrustReset
+            } else {
+                CertificateReconciliation::Recorded
+            }
+        }
+        None => {
+            identity.node_certificate_fingerprint = Some(current_fingerprint.to_string());
+            CertificateReconciliation::Recorded
         }
     }
 }
@@ -86,12 +132,12 @@ pub fn write_identity(
     let contents = serde_json::to_string_pretty(identity)
         .map_err(|source| IdentityStoreError::Serialize { source })?;
     // Atomic + owner-only: identity carries the paired host trust.
-    sw_core::certificates::write_atomic(state_file, contents.as_bytes(), true).map_err(
-        |_| IdentityStoreError::Write {
+    sw_core::certificates::write_atomic(state_file, contents.as_bytes(), true).map_err(|_| {
+        IdentityStoreError::Write {
             path: state_file.to_path_buf(),
             source: io::Error::other("atomic write failed"),
-        },
-    )
+        }
+    })
 }
 
 #[derive(Debug)]
@@ -100,6 +146,30 @@ pub enum IdentityStoreError {
     Write { path: PathBuf, source: io::Error },
     Parse { source: serde_json::Error },
     Serialize { source: serde_json::Error },
+}
+
+impl std::fmt::Display for IdentityStoreError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Read { path, .. } => {
+                write!(formatter, "failed to read identity from {}", path.display())
+            }
+            Self::Write { path, .. } => {
+                write!(formatter, "failed to write identity to {}", path.display())
+            }
+            Self::Parse { .. } => write!(formatter, "failed to parse identity state"),
+            Self::Serialize { .. } => write!(formatter, "failed to serialize identity state"),
+        }
+    }
+}
+
+impl std::error::Error for IdentityStoreError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read { source, .. } | Self::Write { source, .. } => Some(source),
+            Self::Parse { source } | Self::Serialize { source } => Some(source),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -146,6 +216,7 @@ mod tests {
             node_uuid: NodeUuid::new("00000000-0000-4000-8000-000000000003").expect("valid uuid"),
             node_name: "original".to_string(),
             paired_host: None,
+            node_certificate_fingerprint: None,
         };
         write_identity(&file.path, &original).expect("write identity");
 
@@ -174,12 +245,68 @@ mod tests {
     }
 
     #[test]
+    fn certificate_change_under_pairing_resets_trust_explicitly() {
+        let mut identity = AgentIdentity {
+            node_uuid: NodeUuid::new("00000000-0000-4000-8000-000000000003").expect("valid uuid"),
+            node_name: "node".to_string(),
+            paired_host: Some(PairedHostTrust {
+                host_name: "host".to_string(),
+                host_certificate_fingerprint: "sha256:host".to_string(),
+                host_certificate_pem: Some("pem".to_string()),
+            }),
+            node_certificate_fingerprint: Some("sha256:OLD".to_string()),
+        };
+
+        let outcome = reconcile_certificate(&mut identity, "sha256:NEW");
+
+        assert_eq!(outcome, CertificateReconciliation::TrustReset);
+        assert!(identity.paired_host.is_none());
+        assert_eq!(
+            identity.node_certificate_fingerprint.as_deref(),
+            Some("sha256:NEW")
+        );
+    }
+
+    #[test]
+    fn unchanged_certificate_keeps_trust() {
+        let mut identity = AgentIdentity {
+            node_uuid: NodeUuid::new("00000000-0000-4000-8000-000000000003").expect("valid uuid"),
+            node_name: "node".to_string(),
+            paired_host: Some(PairedHostTrust {
+                host_name: "host".to_string(),
+                host_certificate_fingerprint: "sha256:host".to_string(),
+                host_certificate_pem: Some("pem".to_string()),
+            }),
+            node_certificate_fingerprint: Some("sha256:SAME".to_string()),
+        };
+
+        let outcome = reconcile_certificate(&mut identity, "sha256:SAME");
+
+        assert_eq!(outcome, CertificateReconciliation::Unchanged);
+        assert!(identity.paired_host.is_some());
+    }
+
+    #[test]
+    fn first_run_records_fingerprint_without_reset() {
+        let mut identity = AgentIdentity::new("node".to_string());
+
+        let outcome = reconcile_certificate(&mut identity, "sha256:FIRST");
+
+        assert_eq!(outcome, CertificateReconciliation::Recorded);
+        assert_eq!(
+            identity.node_certificate_fingerprint.as_deref(),
+            Some("sha256:FIRST")
+        );
+    }
+
+    #[test]
     fn persists_paired_host_trust() {
         let file = TempIdentityFile::new("trust");
         let original = AgentIdentity {
             node_uuid: NodeUuid::new("00000000-0000-4000-8000-000000000003").expect("valid uuid"),
             node_name: "node".to_string(),
             paired_host: None,
+            node_certificate_fingerprint: None,
         };
         write_identity(&file.path, &original).expect("write identity");
 
@@ -212,29 +339,5 @@ mod tests {
         .expect_err("missing identity should fail");
 
         assert!(matches!(error, IdentityStoreError::Read { .. }));
-    }
-}
-
-impl std::fmt::Display for IdentityStoreError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Read { path, .. } => {
-                write!(formatter, "failed to read identity from {}", path.display())
-            }
-            Self::Write { path, .. } => {
-                write!(formatter, "failed to write identity to {}", path.display())
-            }
-            Self::Parse { .. } => write!(formatter, "failed to parse identity state"),
-            Self::Serialize { .. } => write!(formatter, "failed to serialize identity state"),
-        }
-    }
-}
-
-impl std::error::Error for IdentityStoreError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Read { source, .. } | Self::Write { source, .. } => Some(source),
-            Self::Parse { source } | Self::Serialize { source } => Some(source),
-        }
     }
 }

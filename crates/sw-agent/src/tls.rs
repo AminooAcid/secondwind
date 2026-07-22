@@ -4,9 +4,7 @@ use axum_server::tls_rustls::RustlsConfig;
 use rustls::{RootCertStore, ServerConfig, server::WebPkiClientVerifier};
 use rustls_pemfile::private_key;
 
-use sw_core::certificates::{
-    CertificateMaterial, CertificateStoreError, certificate_der_from_pem,
-};
+use sw_core::certificates::{CertificateMaterial, CertificateStoreError, certificate_der_from_pem};
 
 use crate::identity::PairedHostTrust;
 

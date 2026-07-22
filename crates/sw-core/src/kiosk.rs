@@ -74,10 +74,8 @@ pub fn write_kiosk_state(
         })?;
     }
 
-    let contents =
-        serde_json::to_string_pretty(state).map_err(|source| KioskStateError::Serialize {
-            source,
-        })?;
+    let contents = serde_json::to_string_pretty(state)
+        .map_err(|source| KioskStateError::Serialize { source })?;
     // Append ".tmp" (never replace the extension) so the temp name can't
     // collide with a sibling file, and stay in the same directory so the
     // rename is atomic.
@@ -150,13 +148,10 @@ mod tests {
     impl Drop for TempStateFile {
         fn drop(&mut self) {
             let _ = fs::remove_file(&self.path);
-            let _ = fs::remove_file(
-                self.path
-                    .with_file_name(format!(
-                        "{}.tmp",
-                        self.path.file_name().expect("name").to_string_lossy()
-                    )),
-            );
+            let _ = fs::remove_file(self.path.with_file_name(format!(
+                "{}.tmp",
+                self.path.file_name().expect("name").to_string_lossy()
+            )));
         }
     }
 

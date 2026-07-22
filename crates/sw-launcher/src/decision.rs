@@ -68,16 +68,53 @@ pub fn decide_after_ask(
     }
 }
 
+/// One plain sentence explaining a decision, shown to the user with every
+/// launch (policies stay hard rules — this only makes them transparent).
+pub fn explain(
+    entry: &AppCatalogEntry,
+    availability: NodeAvailability,
+    decision: &LaunchDecision,
+) -> String {
+    let policy_text = match entry.policy {
+        AppPolicy::AlwaysOnNode => "your policy is \"always on node\"",
+        AppPolicy::AlwaysLocal => "your policy is \"always local\"",
+        AppPolicy::AskEachTime => "you chose where to run it",
+    };
+
+    match decision {
+        LaunchDecision::OnNode => format!(
+            "Running {} on the node — {} and the node is reachable.",
+            entry.display_name, policy_text
+        ),
+        LaunchDecision::WakeThenOnNode => format!(
+            "Waking your node first, then starting {} there — {}.",
+            entry.display_name, policy_text
+        ),
+        LaunchDecision::Local { .. } => match availability {
+            NodeAvailability::Reachable => format!(
+                "Running {} on this PC — {}.",
+                entry.display_name, policy_text
+            ),
+            _ => format!(
+                "Running {} on this PC — the node can't be reached and falling back is allowed.",
+                entry.display_name
+            ),
+        },
+        LaunchDecision::AskUser => format!(
+            "{} is set to ask each time — choose where to run it.",
+            entry.display_name
+        ),
+        LaunchDecision::Unavailable { reason } => reason.clone(),
+    }
+}
+
 fn local_or_unavailable(entry: &AppCatalogEntry) -> LaunchDecision {
     match &entry.local_command {
         Some(command) => LaunchDecision::Local {
             command: command.clone(),
         },
         None => LaunchDecision::Unavailable {
-            reason: format!(
-                "{} has no local copy on this PC.",
-                entry.display_name
-            ),
+            reason: format!("{} has no local copy on this PC.", entry.display_name),
         },
     }
 }
@@ -170,6 +207,42 @@ mod tests {
                 command: "app.exe".to_string()
             }
         );
+    }
+
+    #[test]
+    fn every_decision_gets_a_plain_explanation() {
+        let node_app = entry(AppPolicy::AlwaysOnNode, true, Some("app.exe"));
+
+        let on_node = explain(
+            &node_app,
+            NodeAvailability::Reachable,
+            &LaunchDecision::OnNode,
+        );
+        assert!(on_node.contains("on the node"));
+        assert!(on_node.contains("always on node"));
+
+        let waking = explain(
+            &node_app,
+            NodeAvailability::OffButWakeable,
+            &LaunchDecision::WakeThenOnNode,
+        );
+        assert!(waking.contains("Waking"));
+
+        let fallback = explain(
+            &node_app,
+            NodeAvailability::Unreachable,
+            &LaunchDecision::Local {
+                command: "app.exe".to_string(),
+            },
+        );
+        assert!(fallback.contains("can't be reached"));
+
+        // Product boundary holds in explanations too.
+        for text in [&on_node, &waking, &fallback] {
+            for upstream in ["xpra", "apollo", "moonlight"] {
+                assert!(!text.to_lowercase().contains(upstream));
+            }
+        }
     }
 
     #[test]

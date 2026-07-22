@@ -12,8 +12,7 @@ use std::{
 
 use sw_core::{
     CertificateMaterial, CertificateStoreError, DiskFeatureConfig, HostConfig, NodeConfig,
-    NodeTrust, NodeUuid, ScreenConfig, SecondWindConfig, WakeConfig,
-    load_or_create_certificate,
+    NodeTrust, NodeUuid, ScreenConfig, SecondWindConfig, WakeConfig, load_or_create_certificate,
 };
 
 pub const CONFIG_FILE_NAME: &str = "config.json";
@@ -140,12 +139,12 @@ fn write_config(config_file: &Path, config: &SecondWindConfig) -> Result<(), Hos
     let contents = serde_json::to_string_pretty(config)
         .map_err(|source| HostStateError::Serialize { source })?;
     // Atomic so a crash mid-save never corrupts node trust.
-    sw_core::certificates::write_atomic(config_file, contents.as_bytes(), false).map_err(
-        |_| HostStateError::Write {
+    sw_core::certificates::write_atomic(config_file, contents.as_bytes(), false).map_err(|_| {
+        HostStateError::Write {
             path: config_file.to_path_buf(),
             source: io::Error::other("atomic write failed"),
-        },
-    )
+        }
+    })
 }
 
 /// Detected host display name; never hardcoded. Falls back to a product
@@ -266,8 +265,7 @@ mod tests {
     fn records_paired_node_with_screen_always_on() {
         let dir = TempStateDir::new("records");
         let mut state = HostState::load_or_create(&dir.root).expect("create host state");
-        let node_uuid =
-            NodeUuid::new("00000000-0000-4000-8000-000000000005").expect("valid uuid");
+        let node_uuid = NodeUuid::new("00000000-0000-4000-8000-000000000005").expect("valid uuid");
 
         state
             .record_paired_node(

@@ -286,9 +286,6 @@ SECONDWIND_DISK_CHAP_SECRET="s3cr3t"
         assert_eq!(disk_state(&controller), DiskState::Ready);
 
         controller.export().expect("export");
-        assert!(matches!(
-            disk_state(&controller),
-            DiskState::Exposed { .. }
-        ));
+        assert!(matches!(disk_state(&controller), DiskState::Exposed { .. }));
     }
 }

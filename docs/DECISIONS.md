@@ -6,6 +6,20 @@ Format: newest first. Each entry has a date, the decision, the reasoning, and st
 
 ---
 
+## 2026-07-22 — architecture-review response (apply vs defer)
+
+An external review proposed nine improvements. Triage rule: apply what fixes a defect or fills a spec gap now; defer big rewrites until after the first hardware validation; reject what duplicates upstream or reopens locked decisions. Deferred items live in `docs/BACKLOG.md` with unblock conditions.
+
+- **Applied — per-node operation serialization** (`companion/src-tauri/src/node_ops.rs`): every state-changing operation (UI toggles, auto-connect, launches, USB) runs under that node's lock. This is the deliberate first slice of the proposed reconciliation engine; the full desired-state reconciler is deferred, not rejected. *Status: accepted.*
+- **Applied — panel-mode detection** (DRM connectors + EDID preferred-mode parsing, internal panels first). This was a real v0.1 spec gap ("virtual display matched to the node panel"). The proposed adaptive-streaming telemetry engine is **rejected**: Moonlight/Apollo already negotiate and adapt; plan law #2 forbids reimplementing upstream. *Status: accepted / rejected respectively.*
+- **Applied — decision explanations** (`sw_launcher::explain`): every launch returns one plain sentence for the user. Load/battery **scoring is rejected**: plan §6.4's policy model is locked and predictable-by-design. *Status: accepted / rejected respectively.*
+- **Applied — structured diagnostics**: `tracing` with structured fields in the agent (level via `SECONDWIND_LOG`), per-feature health in `GET /v1/health`. Support bundle + event journal deferred. *Status: accepted.*
+- **Applied — job runner hardening**: enforced timeouts (`SECONDWIND_JOB_TIMEOUT_SECS`, default 1 h), a background reaper thread, and idempotency keys. SQLite durability deferred until real workloads justify it. *Status: accepted.*
+- **Applied — BUG-005 fix**: the identity stores the node's own certificate fingerprint; a changed certificate under an established pairing triggers an explicit trust reset (back to the pairing screen, logged loudly) instead of silently breaking mTLS. DPAPI for host secrets deferred to the hardware pass. *Status: accepted.*
+- **Applied — `spawn_blocking`** around every agent route body (they all run filesystem/subprocess work). *Status: accepted.*
+- **Applied — CI hardening**: `cargo fmt --check`, `clippy -D warnings` (both workspaces), RustSec dependency audit, ShellCheck (errors fail), PSScriptAnalyzer (errors fail). ISO smoke build + fault-injection tests deferred. *Status: accepted.*
+- **Deferred — `api.rs` split + TypeScript bindings + UI state refactor**: mechanical churn with no behavior change; scheduled after the protocol stops moving (post-validation). *Status: deferred.*
+
 ## 2026-07-22 — audit-response choices (monitoring agent findings)
 
 The parallel read-only monitoring agent's `BUG_TRACKER.md` findings BUG-010…017 were triaged; all but one were fixed the same day (job-history eviction, component-based path containment, password-file handoff to the elevated share setup, exact bus-id USB detach matching, disk export rollback, restricted session-pass file, in-process kiosk clock).

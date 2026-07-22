@@ -192,11 +192,9 @@ pub fn load_or_create_credentials(
                 path: state_root.to_path_buf(),
                 source,
             })?;
-            fs::write(&credentials_file, contents).map_err(|source| {
-                ApolloError::ConfigWrite {
-                    path: credentials_file.clone(),
-                    source,
-                }
+            fs::write(&credentials_file, contents).map_err(|source| ApolloError::ConfigWrite {
+                path: credentials_file.clone(),
+                source,
             })?;
             Ok(credentials)
         }
@@ -467,10 +465,8 @@ mod tests {
 
     #[test]
     fn detects_installation_from_candidate_dirs() {
-        let root = std::env::temp_dir().join(format!(
-            "secondwind-apollo-detect-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("secondwind-apollo-detect-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let install = root.join("Apollo");
         fs::create_dir_all(&install).expect("create install dir");
@@ -487,10 +483,8 @@ mod tests {
 
     #[test]
     fn detection_returns_none_without_installation() {
-        let root = std::env::temp_dir().join(format!(
-            "secondwind-apollo-none-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("secondwind-apollo-none-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
 
         assert!(detect_installation_in(&[root]).is_none());

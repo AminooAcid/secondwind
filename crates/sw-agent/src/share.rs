@@ -200,10 +200,8 @@ mod tests {
 
     #[test]
     fn share_env_round_trips_credentials() {
-        let file = std::env::temp_dir().join(format!(
-            "secondwind-share-env-{}.env",
-            std::process::id()
-        ));
+        let file =
+            std::env::temp_dir().join(format!("secondwind-share-env-{}.env", std::process::id()));
         let _ = fs::remove_file(&file);
 
         write_share_env(
