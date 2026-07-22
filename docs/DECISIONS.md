@@ -6,6 +6,22 @@ Format: newest first. Each entry has a date, the decision, the reasoning, and st
 
 ---
 
+## 2026-07-21 — v0.1 implementation choices
+
+Decisions made while completing the v0.1 feature set (companion pairing/screen, kiosk, auto-connect, image automation).
+
+- **Certificate store moved to `sw-core`.** Both peers persist self-signed certs and exchange fingerprints; shared crypto belongs in the shared crate (plan §5). *Status: accepted.*
+- **Pairing PIN/QR are never served over the network API.** `GET /v1/pairing` originally returned the full offer; any LAN peer could have read the PIN and defeated the proximity proof. The PIN/QR now travel only agent → kiosk state file → physical screen. *Status: accepted (security fix).*
+- **Agent ↔ kiosk contract is an atomically-written JSON state file** (`/run/secondwind/kiosk.json`, path from systemd), not a local API. Keeps the network surface mTLS-only, gives the kiosk the PIN/QR without network exposure, and survives either process restarting. *Status: accepted.*
+- **v0.1 kiosk UI is a fullscreen terminal UI** (cage → foot → `sw-kiosk`, unicode QR). Minimal dependencies on a no-desktop node; a richer renderer can replace it later without changing the state-file contract. *Status: accepted for v0.1.*
+- **Companion → node HTTP uses fingerprint-pinned TLS, never WebPKI.** Pre-pairing the pin comes from mDNS TXT/QR; post-pairing always from persisted per-UUID trust. `ureq` with a custom rustls verifier. *Status: accepted.*
+- **Inner stream pairing (Moonlight ↔ Apollo) is automated with a one-shot PIN**: companion generates it, arms it on Apollo's localhost API (random SecondWind-owned dashboard credentials), and forwards it inside the mTLS screen-connect; the kiosk runs the client's pair step once, then streams. Consumed PINs are never retried. *Status: accepted; exact Apollo endpoint/config keys to verify on first hardware test.*
+- **The agent uses the requesting peer's address as the stream target** (`ConnectInfo` on `POST /v1/screen`) instead of any configured host address — zero config, correct across cable/switch/Wi-Fi. *Status: accepted.*
+- **Screen defaults to always-on when a node is paired**, so link-up auto-connect needs zero clicks (plan law #4). Per-node opt-out exists in config for a later UI. *Status: accepted.*
+- **Auto-connect presence is debounced (3 missed scans)** to tolerate the USB-hub Ethernet adapter disappearing briefly (a known dev-host edge case, generalized). *Status: accepted.*
+- **v0.1 agent binds all interfaces on an ephemeral port** (image env), relying on mTLS + pairing for access control. Binding to the link interface only (plan §9) is deferred until interface selection exists. *Status: accepted compromise — revisit.*
+- **v0.1 is not tagged until the first physical host/node test passes.** The plan's acceptance is hardware-observable; tagging on code-complete alone would misrepresent it. *Status: accepted.*
+
 ## 2026-07-22 - v0.1 scaffold choices
 
 v0.1 implementation has started after Phase 0 manual proof passed. The first slice creates the locked monorepo shape and shared Rust crate boundaries without implementing future-phase features.
