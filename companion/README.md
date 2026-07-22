@@ -14,4 +14,4 @@ This folder is scaffolded only. The Tauri manifest and Rust entrypoint exist so 
 
 ## Agent API Contract
 
-The companion must use `sw-core::agent_api` route constants and shared protocol types for node communication. It should not duplicate `/v1/` paths or parse Apollo/Moonlight state directly.
+The companion must use `sw-core::agent_api` route constants and shared protocol types for node communication. It should also use shared discovery constants for `_secondwind._tcp.local.` browsing. It should not duplicate `/v1/` paths or parse Apollo/Moonlight state directly.
