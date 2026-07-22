@@ -1,20 +1,14 @@
-pub const CRATE_PURPOSE: &str = "host-side launch helper scaffold";
+//! Host-side per-app launch logic (v0.3).
+//!
+//! One icon per app. Launch → decide where it runs from the app's policy
+//! and the node's current state, waking the node first when possible. The
+//! decision engine is pure; executing a decision (magic packets, spawning
+//! the seamless client) lives in small side-effect helpers.
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LauncherStatus {
-    pub ready: bool,
-}
+pub mod decision;
+pub mod seamless;
+pub mod wol;
 
-pub fn status() -> LauncherStatus {
-    LauncherStatus { ready: true }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn launcher_scaffold_reports_ready() {
-        assert!(status().ready);
-    }
-}
+pub use decision::*;
+pub use seamless::*;
+pub use wol::*;

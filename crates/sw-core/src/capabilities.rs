@@ -4,6 +4,17 @@ use serde::{Deserialize, Serialize};
 pub struct NodeCapabilities {
     pub node_name: String,
     pub screen: ScreenCapabilities,
+    /// Detected network interfaces (for Wake-on-LAN); defaulted so older
+    /// peers still parse.
+    #[serde(default)]
+    pub network_interfaces: Vec<NetworkInterface>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NetworkInterface {
+    pub name: String,
+    /// Colon-separated lowercase MAC, as read from the running system.
+    pub mac_address: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

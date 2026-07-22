@@ -59,6 +59,7 @@ impl AgentState {
                     panel_modes: Vec::new(),
                     decoders,
                 },
+                network_interfaces: crate::capability_detection::detect_network_interfaces(),
             },
             pairing: Arc::new(RwLock::new(pairing)),
             identity_store: None,
@@ -453,6 +454,7 @@ mod tests {
                     }],
                     decoders,
                 },
+                network_interfaces: Vec::new(),
             },
             pairing: Arc::new(RwLock::new(PairingState::Unavailable {
                 reason: "test".to_string(),

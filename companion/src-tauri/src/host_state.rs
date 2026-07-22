@@ -12,7 +12,8 @@ use std::{
 
 use sw_core::{
     CertificateMaterial, CertificateStoreError, DiskFeatureConfig, HostConfig, NodeConfig,
-    NodeTrust, NodeUuid, ScreenConfig, SecondWindConfig, load_or_create_certificate,
+    NodeTrust, NodeUuid, ScreenConfig, SecondWindConfig, WakeConfig,
+    load_or_create_certificate,
 };
 
 pub const CONFIG_FILE_NAME: &str = "config.json";
@@ -90,9 +91,25 @@ impl HostState {
                     stream_paired: false,
                 },
                 disk: DiskFeatureConfig::default(),
+                wake: WakeConfig::default(),
             },
         );
         self.save()
+    }
+
+    /// Stores the node's Wake-on-LAN targets (learned from capabilities
+    /// right after pairing).
+    pub fn record_wake_targets(
+        &mut self,
+        node_uuid: &NodeUuid,
+        mac_addresses: Vec<String>,
+    ) -> Result<(), HostStateError> {
+        if let Some(node) = self.config.nodes.get_mut(node_uuid) {
+            node.wake = WakeConfig { mac_addresses };
+            self.save()?;
+        }
+
+        Ok(())
     }
 
     pub fn paired_node(&self, node_uuid: &NodeUuid) -> Option<&NodeConfig> {

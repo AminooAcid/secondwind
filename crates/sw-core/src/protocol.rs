@@ -115,3 +115,71 @@ pub enum DiskState {
     /// Exported and reachable at the returned target.
     Exposed { target: DiskTarget },
 }
+
+/// Seamless-apps status (v0.3). The session endpoint's password only ever
+/// travels over the paired mTLS channel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppsStatusResponse {
+    pub session: AppSessionState,
+    pub apps: Vec<NodeAppInfo>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum AppSessionState {
+    NotPaired,
+    Unavailable { reason: String },
+    Ready { endpoint: AppSessionEndpoint },
+}
+
+/// Where the host's seamless-window client attaches.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppSessionEndpoint {
+    pub port: u16,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeAppInfo {
+    pub app_id: String,
+    pub installed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppLaunchRequest {
+    /// Catalog identifier; the agent resolves it against its own whitelist
+    /// and never executes host-supplied command lines.
+    pub app_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppLaunchResponse {
+    pub launched: bool,
+    pub message: Option<String>,
+}
+
+/// Host → node file-share configuration (v0.3). Credentials are for the
+/// dedicated share account the host created — never a user's own login.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShareConfigRequest {
+    /// UNC path of the host share, e.g. `\\\\host-address\\SecondWind`.
+    pub unc_path: String,
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShareStatusResponse {
+    pub share: ShareState,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ShareState {
+    NotPaired,
+    Unavailable { reason: String },
+    NotConfigured,
+    Mounted,
+}

@@ -4,7 +4,7 @@ use std::{
     process::Command,
 };
 
-use sw_core::{DecodeApi, VideoCodec, VideoDecoderCapability};
+use sw_core::{DecodeApi, NetworkInterface, VideoCodec, VideoDecoderCapability};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaApiProbe {
@@ -88,6 +88,39 @@ fn is_h264_decode_line(line: &str) -> bool {
 #[derive(Debug)]
 pub enum VaApiProbeError {
     Spawn(std::io::Error),
+}
+
+/// Detects physical network interfaces (name + MAC) for Wake-on-LAN.
+/// Reads the running system; nothing is assumed about interface names.
+pub fn detect_network_interfaces() -> Vec<NetworkInterface> {
+    network_interfaces_in("/sys/class/net")
+}
+
+pub fn network_interfaces_in(net_dir: impl AsRef<Path>) -> Vec<NetworkInterface> {
+    let Ok(entries) = fs::read_dir(net_dir) else {
+        return Vec::new();
+    };
+
+    let mut interfaces: Vec<NetworkInterface> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_str()?.to_string();
+            if name == "lo" {
+                return None;
+            }
+            let mac_address = fs::read_to_string(entry.path().join("address"))
+                .ok()?
+                .trim()
+                .to_lowercase();
+            // Skip virtual interfaces without a real MAC.
+            if mac_address.is_empty() || mac_address == "00:00:00:00:00:00" {
+                return None;
+            }
+            Some(NetworkInterface { name, mac_address })
+        })
+        .collect();
+    interfaces.sort_by(|a, b| a.name.cmp(&b.name));
+    interfaces
 }
 
 #[cfg(test)]
@@ -176,6 +209,28 @@ libva info: Trying to open /usr/lib/x86_64-linux-gnu/dri/i965_drv_video.so
                 root.path().join("renderD_beta")
             ]
         );
+    }
+
+    #[test]
+    fn network_interfaces_skip_loopback_and_empty_macs() {
+        let root = TempDirGuard::new("net-interfaces");
+        for (name, mac) in [
+            ("lo", "00:00:00:00:00:00"),
+            ("eth0", "AA:BB:CC:DD:EE:01"),
+            ("wlan0", "aa:bb:cc:dd:ee:02"),
+            ("veth-x", "00:00:00:00:00:00"),
+        ] {
+            let dir = root.path().join(name);
+            fs::create_dir_all(&dir).expect("iface dir");
+            fs::write(dir.join("address"), format!("{mac}\n")).expect("mac file");
+        }
+
+        let interfaces = network_interfaces_in(root.path());
+
+        assert_eq!(interfaces.len(), 2);
+        assert_eq!(interfaces[0].name, "eth0");
+        assert_eq!(interfaces[0].mac_address, "aa:bb:cc:dd:ee:01");
+        assert_eq!(interfaces[1].name, "wlan0");
     }
 
     #[test]

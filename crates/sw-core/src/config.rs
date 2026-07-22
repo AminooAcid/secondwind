@@ -44,6 +44,10 @@ pub struct SecondWindConfig {
     pub config_version: u16,
     pub host: HostConfig,
     pub nodes: BTreeMap<NodeUuid, NodeConfig>,
+    /// v0.3 app library: catalog + per-app policy. Defaults to the v1
+    /// catalog on first read of an older config.
+    #[serde(default = "crate::apps::default_catalog")]
+    pub apps: Vec<crate::apps::AppCatalogEntry>,
 }
 
 impl SecondWindConfig {
@@ -52,6 +56,7 @@ impl SecondWindConfig {
             config_version: CURRENT_CONFIG_VERSION,
             host,
             nodes: BTreeMap::new(),
+            apps: crate::apps::default_catalog(),
         }
     }
 }
@@ -69,6 +74,16 @@ pub struct NodeConfig {
     /// v0.2 disk feature; defaulted so v0.1 configs migrate forward.
     #[serde(default)]
     pub disk: DiskFeatureConfig,
+    /// v0.3: Wake-on-LAN targets learned from the node's capabilities at
+    /// pairing time; defaulted for older configs.
+    #[serde(default)]
+    pub wake: WakeConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct WakeConfig {
+    /// MACs to send magic packets to (every detected interface).
+    pub mac_addresses: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +147,9 @@ mod tests {
                     stream_paired: false,
                 },
                 disk: DiskFeatureConfig::default(),
+                wake: WakeConfig {
+                    mac_addresses: vec!["aa:bb:cc:dd:ee:ff".to_string()],
+                },
             },
         );
 
