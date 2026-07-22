@@ -21,6 +21,14 @@ Phase 0 used upstream UIs manually. v0.1 begins replacing that with:
 - SecondWind-controlled screen startup.
 - SecondWind logs for support.
 
+## Host And Node Experience
+
+The host and node sides must both become easier than the Phase 0 proof:
+
+- Host users interact with the SecondWind companion, not the Apollo browser dashboard. The companion owns Apollo configuration, virtual-display setup, pairing state, screen toggles, recovery actions, and user-facing diagnostics.
+- Node users interact with the SecondWind node image, not Debian package setup, Moonlight settings, `cage`, `vainfo`, or driver selection. The node image owns capability detection, kiosk supervision, pairing display, service startup, and clear local status/error screens.
+- Developer/debug logs may expose Apollo, Moonlight, Debian, VA-API, or network details for support, but normal product flows should explain problems in SecondWind terms.
+
 ## v0.1 Flow
 
 1. The node boots into a minimal Debian system.
@@ -58,3 +66,5 @@ Capability detection must inspect the running machine. It must not assume:
 - IP address
 
 The Phase 0 proof showed why this matters: the working Intel H.264 decoder was not the first render device.
+
+Current first slice implements a VA-API probe that enumerates `/dev/dri/renderD*`, runs `vainfo` for each candidate render node, and treats H.264 support as valid only when `VAEntrypointVLD` is present. This will feed `/v1/capabilities` as the agent API is built out.

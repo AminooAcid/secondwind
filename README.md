@@ -8,6 +8,10 @@ Current status: v0.1 has started. Phase 0 manual proof passed on the first devel
 
 SecondWind is the user-facing product. Apollo, Moonlight, Debian, cage, VA-API tools, and related services are upstream internals. Normal users should not open the Apollo dashboard, run Moonlight setup, choose drivers, edit Debian configuration, or type terminal commands on the node.
 
+On the host, the Windows companion configures and supervises upstream pieces like Apollo. Users should not open Apollo in a browser for normal setup or operation.
+
+On the node, the SecondWind image configures and supervises Linux services, capability detection, and the kiosk. Users should not install packages, choose GPU drivers, or launch Moonlight by hand.
+
 The intended user path is:
 
 1. Install the SecondWind Windows companion.
