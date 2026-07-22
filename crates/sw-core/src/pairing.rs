@@ -64,6 +64,7 @@ impl PairingQrPayload {
 pub struct PairingRequest {
     pub host_name: String,
     pub host_certificate_fingerprint: String,
+    pub host_certificate_pem: String,
     pub pin: PairingPin,
 }
 
@@ -114,6 +115,20 @@ mod tests {
         assert_eq!(PairingPin::new("12345"), Err(PairingError::InvalidPin));
         assert_eq!(PairingPin::new("1234567"), Err(PairingError::InvalidPin));
         assert_eq!(PairingPin::new("12a456"), Err(PairingError::InvalidPin));
+    }
+
+    #[test]
+    fn pairing_request_carries_host_certificate_material() {
+        let request = PairingRequest {
+            host_name: "host".to_string(),
+            host_certificate_fingerprint: "sha256:host".to_string(),
+            host_certificate_pem: "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----"
+                .to_string(),
+            pin: PairingPin::new("123456").expect("valid pin"),
+        };
+
+        assert_eq!(request.host_certificate_fingerprint, "sha256:host");
+        assert!(request.host_certificate_pem.contains("BEGIN CERTIFICATE"));
     }
 
     #[test]

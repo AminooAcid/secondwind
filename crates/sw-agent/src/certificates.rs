@@ -129,7 +129,7 @@ fn create_parent(path: &Path) -> Result<(), CertificateStoreError> {
     Ok(())
 }
 
-fn certificate_der_from_pem(certificate_pem: &str) -> Result<Vec<u8>, CertificateStoreError> {
+pub fn certificate_der_from_pem(certificate_pem: &str) -> Result<Vec<u8>, CertificateStoreError> {
     let mut in_certificate = false;
     let mut encoded = String::new();
 

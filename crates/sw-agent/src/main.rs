@@ -5,6 +5,7 @@ use sw_agent::{
     certificates::load_or_create_certificate,
     identity::load_or_create_identity,
     pairing_state::{PairingState, runtime_pairing_offer},
+    tls::agent_tls_config,
 };
 
 const STATE_FILE_ENV: &str = "SECONDWIND_AGENT_STATE_FILE";
@@ -28,15 +29,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         None => runtime_pairing_offer(
             identity.node_uuid,
             identity.node_name.clone(),
-            certificate.fingerprint,
+            certificate.fingerprint.clone(),
         )?,
     };
     let state = AgentState::detect_with_pairing(identity.node_uuid, identity.node_name, pairing)
         .with_identity_store(runtime.state_file.clone());
 
     if let Some(bind_addr) = runtime.bind_addr {
-        let listener = tokio::net::TcpListener::bind(bind_addr).await?;
-        axum::serve(listener, router(state)).await?;
+        let tls_config = agent_tls_config(&certificate, identity.paired_host.as_ref())?;
+        axum_server::bind_rustls(bind_addr, tls_config)
+            .serve(router(state).into_make_service())
+            .await?;
     } else {
         let health = health_response(&state);
         println!(

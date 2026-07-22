@@ -75,6 +75,7 @@ impl PairingState {
             paired_host: Some(PairedHostTrust {
                 host_name: request.host_name,
                 host_certificate_fingerprint: request.host_certificate_fingerprint,
+                host_certificate_pem: Some(request.host_certificate_pem),
             }),
         }
     }
@@ -210,6 +211,7 @@ mod tests {
         let result = state.prepare_submit_request(PairingRequest {
             host_name: "host".to_string(),
             host_certificate_fingerprint: "host-fingerprint".to_string(),
+            host_certificate_pem: "host certificate".to_string(),
             pin: fixed_pin_for_tests(),
         });
 
@@ -244,6 +246,7 @@ mod tests {
         let result = state.prepare_submit_request(PairingRequest {
             host_name: "host".to_string(),
             host_certificate_fingerprint: "host-fingerprint".to_string(),
+            host_certificate_pem: "host certificate".to_string(),
             pin: PairingPin::new("654321").expect("valid pin"),
         });
 

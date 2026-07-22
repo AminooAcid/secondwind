@@ -28,6 +28,8 @@ impl AgentIdentity {
 pub struct PairedHostTrust {
     pub host_name: String,
     pub host_certificate_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_certificate_pem: Option<String>,
 }
 
 pub fn load_or_create_identity(
@@ -62,7 +64,7 @@ pub fn persist_paired_host(
         path: state_file.to_path_buf(),
         source,
     })?;
-    let mut identity =
+    let mut identity: AgentIdentity =
         serde_json::from_str(&contents).map_err(|source| IdentityStoreError::Parse { source })?;
     identity.paired_host = Some(paired_host);
     write_identity(state_file, &identity)?;
@@ -183,6 +185,7 @@ mod tests {
             PairedHostTrust {
                 host_name: "host".to_string(),
                 host_certificate_fingerprint: "sha256:host".to_string(),
+                host_certificate_pem: Some("host certificate".to_string()),
             },
         )
         .expect("persist host trust");
@@ -200,6 +203,7 @@ mod tests {
             PairedHostTrust {
                 host_name: "host".to_string(),
                 host_certificate_fingerprint: "sha256:host".to_string(),
+                host_certificate_pem: Some("host certificate".to_string()),
             },
         )
         .expect_err("missing identity should fail");

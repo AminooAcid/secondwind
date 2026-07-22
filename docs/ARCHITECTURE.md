@@ -58,7 +58,7 @@ The first API slice provides these routes as an in-process router so behavior ca
 
 Agent runtime configuration is supplied outside source. The agent reads its state-file path, certificate path, key path, optional bind address, and display name from environment/config so source does not bake in ports, interfaces, or machine-specific paths.
 
-Pairing routes currently expose explicit `Unavailable`, `WaitingForHost`, and `Paired` states. The agent generates and persists node certificate material from externally supplied paths, self-heals interrupted certificate/key writes, then exposes the node certificate fingerprint and QR-ready payload in pairing state. Paired-host trust is persisted before the live state is marked paired. Mutual TLS is still upcoming v0.1 work.
+Pairing routes currently expose explicit `Unavailable`, `WaitingForHost`, and `Paired` states. The agent generates and persists node certificate material from externally supplied paths, self-heals interrupted certificate/key writes, then exposes the node certificate fingerprint and QR-ready payload in pairing state. Paired-host trust, including the host certificate material needed for TLS client authentication, is persisted before the live state is marked paired. The bound agent API uses HTTPS; after pairing, the server configuration requires a client certificate chaining to the persisted host certificate.
 
 ## Capability Detection
 

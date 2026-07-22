@@ -285,6 +285,7 @@ mod tests {
             PairingRequest {
                 host_name: "host".to_string(),
                 host_certificate_fingerprint: "host-fingerprint".to_string(),
+                host_certificate_pem: "host certificate".to_string(),
                 pin: PairingPin::new("123456").expect("valid pin"),
             },
         );
@@ -321,6 +322,7 @@ mod tests {
             PairingRequest {
                 host_name: "host".to_string(),
                 host_certificate_fingerprint: "host-fingerprint".to_string(),
+                host_certificate_pem: "host certificate".to_string(),
                 pin: PairingPin::new("123456").expect("valid pin"),
             },
         );
@@ -333,6 +335,7 @@ mod tests {
             PairedHostTrust {
                 host_name: "host".to_string(),
                 host_certificate_fingerprint: "host-fingerprint".to_string(),
+                host_certificate_pem: Some("host certificate".to_string()),
             }
         );
     }
