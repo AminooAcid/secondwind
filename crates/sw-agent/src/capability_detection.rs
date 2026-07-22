@@ -130,10 +130,34 @@ pub fn panel_modes_in(drm_dir: impl AsRef<Path>) -> Vec<PanelMode> {
     connectors
         .into_iter()
         .filter_map(|(_, _, path)| {
-            let edid = fs::read(path.join("edid")).ok()?;
-            parse_edid_preferred_mode(&edid)
+            // Preferred: full EDID (resolution + refresh). Real-hardware
+            // finding: some panels expose an EMPTY sysfs edid (seen on a
+            // Haswell eDP) — fall back to the connector's `modes` list,
+            // whose first entry is the preferred resolution. Refresh is
+            // then genuinely unknown and reported as 0, never invented.
+            let edid = fs::read(path.join("edid")).unwrap_or_default();
+            parse_edid_preferred_mode(&edid).or_else(|| {
+                let modes = fs::read_to_string(path.join("modes")).ok()?;
+                parse_preferred_from_modes(&modes)
+            })
         })
         .collect()
+}
+
+/// Parses the first line of a DRM connector `modes` file ("1920x1080").
+pub fn parse_preferred_from_modes(modes: &str) -> Option<PanelMode> {
+    let first = modes.lines().next()?.trim();
+    let (width, height) = first.split_once('x')?;
+    let width_px: u32 = width.parse().ok()?;
+    let height_px: u32 = height.parse().ok()?;
+    if width_px == 0 || height_px == 0 {
+        return None;
+    }
+    Some(PanelMode {
+        width_px,
+        height_px,
+        refresh_millihz: 0, // unknown — sysfs modes carry no refresh
+    })
 }
 
 /// Parses the EDID's first detailed timing descriptor (the panel's
@@ -316,6 +340,23 @@ libva info: Trying to open /usr/lib/x86_64-linux-gnu/dri/i965_drv_video.so
     fn truncated_or_zeroed_edid_yields_no_mode() {
         assert!(parse_edid_preferred_mode(&[0_u8; 20]).is_none());
         assert!(parse_edid_preferred_mode(&[0_u8; 128]).is_none());
+    }
+
+    #[test]
+    fn empty_edid_falls_back_to_the_modes_list() {
+        let root = TempDirGuard::new("empty-edid");
+        let dir = root.path().join("card1-eDP-1");
+        fs::create_dir_all(&dir).expect("connector dir");
+        fs::write(dir.join("status"), "connected\n").expect("status");
+        fs::write(dir.join("edid"), []).expect("empty edid");
+        fs::write(dir.join("modes"), "1920x1080\n1600x900\n").expect("modes");
+
+        let modes = panel_modes_in(root.path());
+
+        assert_eq!(modes.len(), 1);
+        assert_eq!(modes[0].width_px, 1920);
+        assert_eq!(modes[0].height_px, 1080);
+        assert_eq!(modes[0].refresh_millihz, 0);
     }
 
     #[test]
