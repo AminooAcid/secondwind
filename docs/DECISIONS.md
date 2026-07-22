@@ -1,0 +1,20 @@
+# Decision log (ADR)
+
+Every non-trivial decision, with date and reasoning. Architectural decisions locked in `SECONDWIND_PLAN.md` §3 are not repeated here — this log records choices made *while building*, especially anything the plan left open.
+
+Format: newest first. Each entry has a date, the decision, the reasoning, and status.
+
+---
+
+## 2026-07-21 — Phase 0 documentation choices
+
+Phase 0 is docs-only (a manual proof). No product code was written. The following choices were made while writing `FIRST-SETUP.md`; each is a *manual-proof convenience*, not a product commitment — Phase 1 will re-decide how the image automates them.
+
+- **Moonlight installed from the official Cloudsmith apt repo** (Flatpak as fallback). Reasoning: leaner than Flatpak and closer to what the eventual Debian image will bundle; Flatpak kept as a fallback for restricted networks. *Status: accepted for Phase 0.*
+- **VA-API decode driver chosen by detected GPU generation**, not hardcoded: `intel-media-va-driver-non-free` for Intel Gen8+ (2014+), `i965-va-driver` for older Intel (Haswell and earlier), `mesa-va-drivers` for AMD. Reasoning: honours plan §2 "detect, never assume"; the dev node's HD 4600 (Haswell) specifically needs the older `i965` driver, which a single hardcoded choice would get wrong. *Status: accepted.*
+- **`cage` used as the kiosk compositor even in the manual proof.** Reasoning: a no-desktop Debian has no way to display a GUI app otherwise, and it matches the locked kiosk decision (plan §3). *Status: accepted.*
+- **Partitioning via the installer's "Guided – use the largest continuous free space"** rather than manual partitioning. Reasoning: safest guided path that provably uses only unallocated space and preserves the existing OS; lowest risk for a beginner. *Status: accepted.*
+- **`GRUB_DISABLE_OS_PROBER=false` set post-install** so the existing OS appears in GRUB without changing the Debian-default entry. Reasoning: recent Debian hides other OSes by default; this restores the dual-boot menu the plan requires while keeping the node entry as default. *Status: accepted.*
+- **First proof link defaults to "same network (DHCP)"**, with direct-cable + static IPs documented as the recommended daily setup. Reasoning: fastest path to the Phase 0 acceptance; direct cable is a docs recommendation, never a code assumption (plan §2). *Status: accepted.*
+- **Repo layout:** treated the working directory `code/` as the monorepo root and created only `docs/` for Phase 0 (no Cargo workspace, crates, installer, or image config yet). Reasoning: plan §7 says build strictly in phase order and Phase 0 is docs-only. *Status: accepted; revisit at v0.1 start.*
+- **`PROFILE-dev-machine.md` copied into `docs/`** to match the §5 layout and make the repo self-contained. The parent-level source copy the developer supplied is left untouched. *Status: accepted.*
