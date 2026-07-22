@@ -183,6 +183,12 @@ install -m 0440 "$INCLUDES/etc/sudoers.d/secondwind-usb" /etc/sudoers.d/secondwi
 
 say "6/7 enabling services"
 systemctl daemon-reload
+# Debian's xpra package ships a socket-activated xpra-server.socket that
+# listens on 14500 — the same port SecondWind's own session uses (found on
+# hardware). We run our own supervised session, so disable + mask the
+# distro units to free the port and avoid a competing server.
+systemctl disable --now xpra-server.socket xpra-server.service 2>/dev/null || true
+systemctl mask xpra-server.socket xpra-server.service 2>/dev/null || true
 sh "$INSTALL_DIR/node-image/live-build/config/hooks/normal/0200-enable-services.hook.chroot"
 systemctl restart sw-agent.service 2>/dev/null || true
 

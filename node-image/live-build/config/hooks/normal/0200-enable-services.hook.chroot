@@ -13,7 +13,9 @@ systemctl enable sw-kiosk.service
 # the agent. Enabled so an exported disk survives reboots (v0.2).
 systemctl enable secondwind-disk-provision.service
 systemctl enable secondwind-disk.service
-# Apps: one supervised session; password regenerated each boot.
+# Apps: one supervised session; password regenerated each boot. Mask the
+# distro's socket-activated xpra (binds our port 14500) — we run our own.
+systemctl mask xpra-server.socket xpra-server.service 2>/dev/null || true
 systemctl enable sw-xpra-provision.service
 systemctl enable sw-xpra.service
 # USB: export daemon.
