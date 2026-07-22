@@ -1,6 +1,7 @@
 pub mod apollo;
 pub mod app_control;
 pub mod auto_connect;
+pub mod dev_cli;
 pub mod discovery;
 pub mod disk_control;
 pub mod host_state;

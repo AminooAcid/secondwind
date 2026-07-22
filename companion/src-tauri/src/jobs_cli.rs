@@ -31,7 +31,7 @@ pub fn run(args: &[String]) -> i32 {
     }
 }
 
-fn state_dir() -> Result<PathBuf, String> {
+pub(crate) fn state_dir() -> Result<PathBuf, String> {
     if let Ok(dir) = std::env::var("SECONDWIND_COMPANION_STATE_DIR")
         && !dir.trim().is_empty()
     {
