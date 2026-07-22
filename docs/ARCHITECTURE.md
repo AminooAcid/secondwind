@@ -61,6 +61,22 @@ JSON over HTTPS, versioned under `/v1/`, mutual TLS after pairing. The agent bin
 - The companion drives the Windows initiator through bundled PowerShell scripts: attach (with first-use GPT/NTFS initialization of the SecondWind disk only), drive-letter assignment from per-node config, and flush + detach.
 - Ordering: bring-up is screen → disk; teardown is disk (flush first) → screen. On link loss, the local initiator session is still flushed and cleaned using the last-known IQN.
 
+## Apps (v0.3)
+
+- **Policy engine** (`sw-launcher`): per-app *Always on node / Always local / Ask each time* + *fallback-to-local*, resolved against live node availability (reachable / off-but-wakeable / unreachable). Pure and unit-tested; "ask" bubbles to the UI.
+- **Node session**: the image runs one xpra session (`sw-xpra.service`) with a per-boot random password. The agent's `GET /v1/apps` returns the session endpoint (mTLS only) plus which whitelisted apps are installed; `POST /v1/apps` launches by `app_id` against the node's own catalog (`/etc/secondwind/apps.json`) — host-supplied command lines are never executed.
+- **Seamless windows**: the companion attaches the host xpra client to the session (`sw_launcher::attach_spec`), so node apps appear as native host windows.
+- **Files**: the host exposes one dedicated folder over SMB (`Enable-SecondWindShare.ps1`: dedicated `SecondWindShare` local account, random password, elevation once). Before any node launch the companion sends the UNC + credentials over mTLS; the agent's polkit-scoped `secondwind-share` unit mounts it via CIFS. Apps read/write user files through the mount; nothing persists on the node.
+- **Cache-and-sync**: catalog entries with `synced_profile` run through `secondwind-run-synced.sh` — profile copied from the share to node tmpfs at session start (single-instance flock), `$HOME` redirected, atomically staged + swapped back on exit.
+- **Wake-on-LAN**: the agent detects interface MACs (`/sys/class/net`); the companion stores them at pairing. A launch against a powered-off node sends magic packets, waits for mDNS reappearance (pinning stored trust, not discovery), then proceeds.
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/v1/apps` | GET | session endpoint + installed apps (paired only) |
+| `/v1/apps` | POST | launch by whitelisted `app_id` |
+| `/v1/share` | GET | share mount state |
+| `/v1/share` | POST | configure + mount the host share |
+
 ## Capability Detection
 
 Capability detection inspects the running machine and never assumes GPU model, render device order, codec support, panel modes, interface names, paths, or addresses. The VA-API probe enumerates `/dev/dri/renderD*`, runs `vainfo` per node, and counts H.264 decode only on `VAEntrypointVLD`. (Phase 0 proof: the working decoder was not the first render device.)

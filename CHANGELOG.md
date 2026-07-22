@@ -3,6 +3,27 @@
 All notable changes to SecondWind. Format loosely follows Keep a Changelog;
 versions are tagged only after their phase acceptance passes on hardware.
 
+## [Unreleased — v0.3 code-complete]
+
+### Added
+- App library with per-app policy (always on node / always local / ask) and
+  fallback-to-local, editable in the companion UI; v1 catalog: Firefox,
+  Chromium, VLC, LibreOffice, GIMP, PDF reader.
+- `sw-launcher` decision engine, Wake-on-LAN magic packets, and the
+  seamless-client attach spec (all unit-tested).
+- Node app session (xpra, per-boot random password) with whitelisted
+  launches via `GET`/`POST /v1/apps` (mTLS only).
+- Host file share: dedicated `SecondWindShare` account + SMB share created
+  by an elevated script; node mounts it via the polkit-scoped
+  `secondwind-share` unit (`GET`/`POST /v1/share`).
+- Cache-and-sync wrapper for live-profile apps (tmpfs session copy, atomic
+  sync-back, single-instance lock).
+- Agent detects interface MACs; the companion records wake targets at
+  pairing and wakes powered-off nodes on launch.
+
+### Fixed
+- Flaky companion test: parallel tests shared a certificate temp dir.
+
 ## [Unreleased — v0.2 code-complete]
 
 ### Added

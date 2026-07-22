@@ -15,9 +15,10 @@ use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime},
 };
 use sw_core::{
+    AppLaunchRequest, AppLaunchResponse, AppsStatusResponse, CapabilitiesResponse,
     CertificateMaterial, DiskCommandRequest, DiskStatusResponse, PairingRequest, PairingResponse,
-    ScreenCommandRequest, ScreenStatusResponse,
-    agent_api::{DISK_PATH, PAIRING_PATH, SCREEN_PATH},
+    ScreenCommandRequest, ScreenStatusResponse, ShareConfigRequest, ShareStatusResponse,
+    agent_api::{APPS_PATH, CAPABILITIES_PATH, DISK_PATH, PAIRING_PATH, SCREEN_PATH, SHARE_PATH},
     certificate_der_from_pem, fingerprint_of_der,
 };
 
@@ -255,6 +256,36 @@ pub fn get_disk_status(
     get_json(endpoint, client_identity, DISK_PATH)
 }
 
+pub fn get_capabilities(
+    endpoint: &NodeEndpoint,
+    client_identity: Option<&CertificateMaterial>,
+) -> Result<CapabilitiesResponse, NodeClientError> {
+    get_json(endpoint, client_identity, CAPABILITIES_PATH)
+}
+
+pub fn get_apps_status(
+    endpoint: &NodeEndpoint,
+    client_identity: Option<&CertificateMaterial>,
+) -> Result<AppsStatusResponse, NodeClientError> {
+    get_json(endpoint, client_identity, APPS_PATH)
+}
+
+pub fn post_app_launch(
+    endpoint: &NodeEndpoint,
+    client_identity: Option<&CertificateMaterial>,
+    request: &AppLaunchRequest,
+) -> Result<AppLaunchResponse, NodeClientError> {
+    post_json(endpoint, client_identity, APPS_PATH, request)
+}
+
+pub fn post_share_config(
+    endpoint: &NodeEndpoint,
+    client_identity: Option<&CertificateMaterial>,
+    request: &ShareConfigRequest,
+) -> Result<ShareStatusResponse, NodeClientError> {
+    post_json(endpoint, client_identity, SHARE_PATH, request)
+}
+
 /// Submits the pairing request to the node. The connection is pinned to the
 /// fingerprint shown in the node's advertisement/QR, and no client cert is
 /// presented (the node only requires mTLS after pairing).
@@ -328,8 +359,13 @@ mod tests {
     use super::*;
 
     fn test_certificate(name: &str) -> CertificateMaterial {
+        // Unique per call: tests run in parallel and must never share a
+        // certificate directory (cleanup would race generation).
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let unique = COUNTER.fetch_add(1, Ordering::SeqCst);
         let root = std::env::temp_dir().join(format!(
-            "secondwind-node-client-{}-{name}",
+            "secondwind-node-client-{}-{unique}-{name}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&root);

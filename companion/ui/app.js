@@ -1,5 +1,8 @@
 const state = {
   nodes: [],
+  apps: [],
+  // app_id -> true while a launch is in flight or awaiting a choice
+  appPendingChoice: new Set(),
   selectedNodeUuid: null,
   // node_uuid -> { display_name, node_certificate_fingerprint, screen_always_on }
   paired: new Map(),
@@ -27,6 +30,7 @@ const elements = {
   screenToggle: document.querySelector("#screenToggle"),
   diskToggle: document.querySelector("#diskToggle"),
   statusLine: document.querySelector("#statusLine"),
+  appList: document.querySelector("#appList"),
 };
 
 function tauriInvoke(command, args) {
@@ -117,9 +121,140 @@ function renderDetail() {
     : "Attach Disk";
 }
 
+const POLICY_LABELS = {
+  always_on_node: "Always on node",
+  always_local: "Always local",
+  ask_each_time: "Ask each time",
+};
+
+function renderApps() {
+  elements.appList.innerHTML = "";
+
+  if (state.apps.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "The app library is loading…";
+    elements.appList.append(empty);
+    return;
+  }
+
+  for (const app of state.apps) {
+    const row = document.createElement("div");
+    row.className = "app-row";
+    row.setAttribute("role", "listitem");
+
+    const name = document.createElement("span");
+    name.className = "app-name";
+    name.textContent = app.display_name;
+
+    const policy = document.createElement("select");
+    for (const [value, label] of Object.entries(POLICY_LABELS)) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      option.selected = app.policy === value;
+      policy.append(option);
+    }
+    policy.addEventListener("change", () => saveAppPolicy(app, policy.value, fallback.checked));
+
+    const fallbackLabel = document.createElement("label");
+    fallbackLabel.className = "fallback";
+    const fallback = document.createElement("input");
+    fallback.type = "checkbox";
+    fallback.checked = app.fallback_to_local;
+    fallback.addEventListener("change", () => saveAppPolicy(app, policy.value, fallback.checked));
+    fallbackLabel.append(fallback, document.createTextNode("Fall back to this PC"));
+
+    row.append(name, policy, fallbackLabel);
+
+    if (state.appPendingChoice.has(app.app_id)) {
+      const choice = document.createElement("span");
+      choice.className = "app-choice";
+      const onNode = document.createElement("button");
+      onNode.type = "button";
+      onNode.textContent = "On node";
+      onNode.addEventListener("click", () => launchApp(app, true));
+      const local = document.createElement("button");
+      local.type = "button";
+      local.textContent = "On this PC";
+      local.addEventListener("click", () => launchApp(app, false));
+      choice.append(onNode, local);
+      row.append(choice);
+    } else {
+      const launch = document.createElement("button");
+      launch.type = "button";
+      launch.textContent = "Launch";
+      launch.disabled = state.busy;
+      launch.addEventListener("click", () => launchApp(app, null));
+      row.append(launch);
+    }
+
+    elements.appList.append(row);
+  }
+}
+
+async function refreshApps() {
+  try {
+    state.apps = await tauriInvoke("app_library");
+  } catch (error) {
+    state.apps = [];
+  }
+  render();
+}
+
+async function saveAppPolicy(app, policy, fallbackToLocal) {
+  try {
+    await tauriInvoke("set_app_policy", {
+      appId: app.app_id,
+      policy,
+      fallbackToLocal,
+    });
+    app.policy = policy;
+    app.fallback_to_local = fallbackToLocal;
+    setStatus(`${app.display_name}: ${POLICY_LABELS[policy].toLowerCase()}.`);
+  } catch (error) {
+    setStatus(String(error));
+  }
+  render();
+}
+
+async function launchApp(app, choiceOnNode) {
+  state.appPendingChoice.delete(app.app_id);
+  setStatus(`Starting ${app.display_name}…`);
+  render();
+
+  try {
+    const result = await tauriInvoke("launch_app", {
+      appId: app.app_id,
+      node: selectedNode(),
+      choiceOnNode,
+    });
+
+    switch (result.outcome) {
+      case "on_node":
+        setStatus(`${app.display_name} is running on your node.`);
+        break;
+      case "local":
+        setStatus(`${app.display_name} is running on this PC.`);
+        break;
+      case "needs_choice":
+        state.appPendingChoice.add(app.app_id);
+        setStatus(`Where should ${app.display_name} run?`);
+        break;
+      case "failed":
+        setStatus(result.message ?? `${app.display_name} could not be started.`);
+        break;
+    }
+  } catch (error) {
+    setStatus(String(error));
+  }
+  render();
+}
+
 function render() {
   renderNodes();
   renderDetail();
+  renderApps();
 }
 
 async function refreshPaired() {
@@ -279,3 +414,4 @@ elements.diskToggle.addEventListener("click", toggleDisk);
 listenForAutoConnect();
 render();
 refreshPaired().then(refreshNodes);
+refreshApps();

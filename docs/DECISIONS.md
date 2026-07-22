@@ -6,6 +6,14 @@ Format: newest first. Each entry has a date, the decision, the reasoning, and st
 
 ---
 
+## 2026-07-21 — v0.3 apps choices
+
+- **One persistent node app session (xpra) instead of per-app sessions.** Single supervised unit, one attach from the host, `xpra control start` per launch; per-boot random password shared over mTLS only. *Status: accepted; `xpra control` flags to verify on hardware.*
+- **Launch requests carry an `app_id`, never a command line.** The node resolves it against its own catalog file; a compromised host session cannot execute arbitrary commands via this route. *Status: accepted.*
+- **Host→node file transport is SMB (Windows built-in server) behind the agent's `/v1/share` abstraction.** A dedicated `SecondWindShare` local account with a random password is created by one elevated script; the user's own Windows credentials never leave the host. The route abstraction keeps SSHFS possible later (plan §4). *Status: accepted.*
+- **Cache-and-sync is a generic wrapper script** (`app-id`, `profile-path`, `command`), config-driven from the catalog's `synced_profile`, with `$HOME` redirection to tmpfs, flock single-instance, and staged atomic sync-back. *Status: accepted.*
+- **Wake targets are all detected MACs, learned at pairing over mTLS.** Magic packets go to every stored MAC (harmless duplicates); wake-wait pins stored trust, not fresh discovery data. *Status: accepted.*
+
 ## 2026-07-21 — v0.2 disk choices
 
 - **The exported LUN is CHAP-protected with node-generated credentials shared over mTLS.** iSCSI itself has no TLS; a bare LUN on the LAN would bypass the pairing trust model. CHAP secrets are random per node, generated at first boot, and only ever travel inside the paired `exposed` response. *Status: accepted.*

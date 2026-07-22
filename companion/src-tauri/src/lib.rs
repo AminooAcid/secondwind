@@ -1,4 +1,5 @@
 pub mod apollo;
+pub mod app_control;
 pub mod auto_connect;
 pub mod discovery;
 pub mod disk_control;
@@ -22,6 +23,9 @@ pub fn run() {
             commands::paired_nodes,
             commands::set_screen,
             commands::set_disk,
+            commands::app_library,
+            commands::set_app_policy,
+            commands::launch_app,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SecondWind companion");
@@ -62,6 +66,7 @@ mod commands {
     use sw_core::{NodeUuid, PairingPin, PairingRequest};
 
     use crate::{
+        app_control,
         auto_connect::ActiveScreens,
         commands_support::{load_host_state, state_root},
         discovery::{self, DiscoveredNode},
@@ -143,6 +148,21 @@ mod commands {
                 node.node_certificate_fingerprint.clone(),
             )
             .map_err(|error| error.to_string())?;
+
+        // Learn wake targets right away (best-effort; mTLS is live now).
+        if let Ok(capabilities) =
+            node_client::get_capabilities(&endpoint, Some(&state.certificate))
+        {
+            let macs: Vec<String> = capabilities
+                .capabilities
+                .network_interfaces
+                .iter()
+                .map(|interface| interface.mac_address.clone())
+                .collect();
+            if !macs.is_empty() {
+                let _ = state.record_wake_targets(&node.node_uuid, macs);
+            }
+        }
 
         Ok(PairedNodeSummary {
             node_uuid: node.node_uuid,
@@ -237,6 +257,89 @@ mod commands {
                 message: None,
             })
         }
+    }
+
+    #[tauri::command]
+    pub fn app_library(app: tauri::AppHandle) -> Result<Vec<sw_core::AppCatalogEntry>, String> {
+        Ok(load_host_state(&app)?.config.apps)
+    }
+
+    #[tauri::command]
+    pub fn set_app_policy(
+        app: tauri::AppHandle,
+        app_id: String,
+        policy: sw_core::AppPolicy,
+        fallback_to_local: bool,
+    ) -> Result<(), String> {
+        let mut state = load_host_state(&app)?;
+        let Some(entry) = state
+            .config
+            .apps
+            .iter_mut()
+            .find(|entry| entry.app_id == app_id)
+        else {
+            return Err("That app is not in the SecondWind library.".to_string());
+        };
+        entry.policy = policy;
+        entry.fallback_to_local = fallback_to_local;
+        state.save().map_err(|error| error.to_string())
+    }
+
+    /// Launches an app per its policy. `node` is the discovered node when
+    /// present; `choice_on_node` carries the user's answer for
+    /// ask-each-time apps (None on the first call).
+    #[tauri::command]
+    pub fn launch_app(
+        app: tauri::AppHandle,
+        app_id: String,
+        node: Option<DiscoveredNode>,
+        choice_on_node: Option<bool>,
+    ) -> Result<app_control::LaunchOutcome, String> {
+        let state_root = state_root(&app)?;
+        let state = load_host_state(&app)?;
+        let Some(entry) = state
+            .config
+            .apps
+            .iter()
+            .find(|entry| entry.app_id == app_id)
+            .cloned()
+        else {
+            return Err("That app is not in the SecondWind library.".to_string());
+        };
+
+        // The app library is per-host; the node used is the paired node in
+        // view (v0.3 UI shows one node at a time, data model supports N).
+        let (node_uuid, endpoint) = match &node {
+            Some(node) => (
+                node.node_uuid,
+                screen_control::paired_endpoint(
+                    &state,
+                    &node.node_uuid,
+                    node.addresses.clone(),
+                    node.api_port,
+                )
+                .ok(),
+            ),
+            None => match state.config.nodes.keys().next() {
+                Some(node_uuid) => (*node_uuid, None),
+                None => {
+                    return Err("Pair with a node before launching apps.".to_string());
+                }
+            },
+        };
+
+        let availability =
+            app_control::availability(&state, &node_uuid, endpoint.is_some());
+        let decision = app_control::resolve_decision(&entry, availability, choice_on_node);
+
+        Ok(app_control::execute_decision(
+            &state,
+            &state_root,
+            &entry,
+            decision,
+            endpoint,
+            &node_uuid,
+        ))
     }
 
     #[cfg(test)]

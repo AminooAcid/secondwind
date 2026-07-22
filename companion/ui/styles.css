@@ -246,6 +246,52 @@ h2 {
   min-height: 22px;
 }
 
+.apps-panel {
+  grid-column: 1 / -1;
+}
+
+.app-list {
+  display: grid;
+  gap: 10px;
+}
+
+.app-row {
+  align-items: center;
+  background: #f9faf7;
+  border: 1px solid #dce2dd;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px;
+}
+
+.app-row .app-name {
+  flex: 1 1 140px;
+  font-weight: 800;
+}
+
+.app-row select {
+  border: 1px solid #cbd4ce;
+  border-radius: 8px;
+  font: inherit;
+  min-height: 38px;
+  padding: 0 8px;
+}
+
+.app-row label.fallback {
+  align-items: center;
+  color: #61706a;
+  display: inline-flex;
+  font-size: 0.85rem;
+  gap: 6px;
+}
+
+.app-choice {
+  display: inline-flex;
+  gap: 8px;
+}
+
 @media (max-width: 760px) {
   .app-shell {
     width: min(100vw - 20px, 620px);
