@@ -68,14 +68,20 @@ fi
 
 # ------------------------------------------------------------- packages --
 say "3/7 installing system packages (this can take a few minutes)"
-KEYRING=/usr/share/keyrings/moonlight.gpg
-if [ ! -f "$KEYRING" ]; then
+# Add the Moonlight repo only if no source for it exists yet — a Phase 0
+# manual setup (or an earlier run) may already provide one with its own
+# keyring path, and apt refuses two sources with different Signed-By.
+if grep -rqs "moonlight-game-streaming/moonlight-qt" \
+    /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
+    say "    (Moonlight package source already present — keeping it)"
+else
+    KEYRING=/usr/share/keyrings/moonlight.gpg
     curl -fsSL "https://dl.cloudsmith.io/public/moonlight-game-streaming/moonlight-qt/gpg.key" \
         | gpg --dearmor -o "$KEYRING"
     printf 'deb [signed-by=%s] https://dl.cloudsmith.io/public/moonlight-game-streaming/moonlight-qt/deb/debian %s main\n' \
         "$KEYRING" "$CODENAME" > /etc/apt/sources.list.d/secondwind-moonlight.list
-    apt-get update -qq
 fi
+apt-get update -qq
 
 # Same set the image installs; VA driver picked at runtime, both installed.
 apt-get install -y -qq \
