@@ -3,12 +3,69 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>SecondWind Companion</title>
+    <title>SecondWind</title>
+    <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
-    <main>
-      <h1>SecondWind</h1>
-      <p>Companion UI scaffold for v0.1.</p>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">SecondWind</p>
+          <h1>Screen Link</h1>
+        </div>
+        <button id="refreshNodes" type="button">Refresh</button>
+      </header>
+
+      <section class="workspace" aria-label="SecondWind companion">
+        <section class="panel node-panel" aria-labelledby="nodesTitle">
+          <div class="panel-heading">
+            <div>
+              <h2 id="nodesTitle">Nodes</h2>
+              <p id="nodeCount">Scanning</p>
+            </div>
+            <span id="scanState" class="state-pill">Idle</span>
+          </div>
+          <div id="nodeList" class="node-list" role="list"></div>
+        </section>
+
+        <section class="panel detail-panel" aria-labelledby="detailTitle">
+          <div class="panel-heading">
+            <div>
+              <h2 id="detailTitle">Node Detail</h2>
+              <p id="detailSubtitle">No node selected</p>
+            </div>
+            <span id="pairingState" class="state-pill muted">Unpaired</span>
+          </div>
+
+          <dl class="metadata">
+            <div>
+              <dt>Name</dt>
+              <dd id="nodeName">-</dd>
+            </div>
+            <div>
+              <dt>Host</dt>
+              <dd id="hostName">-</dd>
+            </div>
+            <div>
+              <dt>API</dt>
+              <dd id="apiVersion">-</dd>
+            </div>
+            <div>
+              <dt>Fingerprint</dt>
+              <dd id="fingerprint">-</dd>
+            </div>
+          </dl>
+
+          <div class="actions">
+            <button id="pairNode" type="button" disabled>Pair</button>
+            <button id="screenToggle" type="button" disabled>Screen Off</button>
+          </div>
+
+          <p id="statusLine" class="status-line" role="status">Ready</p>
+        </section>
+      </section>
     </main>
+
+    <script src="./app.js"></script>
   </body>
 </html>

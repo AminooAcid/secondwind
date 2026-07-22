@@ -81,4 +81,4 @@ Current first slice implements a VA-API probe that enumerates `/dev/dri/renderD*
 
 ## Discovery
 
-The node advertises _secondwind._tcp.local. only after the HTTPS listener has bound, so the advertised port comes from runtime state rather than source constants. TXT records include the node UUID, node display name, node certificate fingerprint, and API version. Address selection is delegated to the mDNS daemon so source does not assume an interface or IP address. The companion uses the same shared constants to browse and parse discovered node TXT records into typed node metadata.
+The node advertises _secondwind._tcp.local. only after the HTTPS listener has bound, so the advertised port comes from runtime state rather than source constants. TXT records include the node UUID, node display name, node certificate fingerprint, and API version. Address selection is delegated to the mDNS daemon so source does not assume an interface or IP address. The companion uses the same shared constants to browse and parse discovered node TXT records into typed node metadata, then exposes that through a Tauri command consumed by the SecondWind UI.

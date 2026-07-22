@@ -1,3 +1,8 @@
+use std::{
+    collections::BTreeMap,
+    time::{Duration, Instant},
+};
+
 use mdns_sd::{Receiver, ResolvedService, ServiceDaemon, ServiceEvent};
 use serde::{Deserialize, Serialize};
 use sw_core::{
@@ -33,6 +38,34 @@ pub fn browse_secondwind_nodes() -> Result<SecondWindNodeBrowser, CompanionDisco
         .map_err(CompanionDiscoveryError::Browse)?;
 
     Ok(SecondWindNodeBrowser { daemon, receiver })
+}
+
+pub fn discover_secondwind_nodes(
+    browse_window: Duration,
+) -> Result<Vec<DiscoveredNode>, CompanionDiscoveryError> {
+    let browser = browse_secondwind_nodes()?;
+    let deadline = Instant::now() + browse_window;
+    let mut nodes = BTreeMap::new();
+
+    while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+        if remaining.is_zero() {
+            break;
+        }
+
+        match browser.receiver().recv_timeout(remaining) {
+            Ok(ServiceEvent::ServiceResolved(service)) => {
+                if let Ok(node) = discovered_node_from_service(&service) {
+                    nodes.insert(node.node_uuid, node);
+                }
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+
+    browser.shutdown()?;
+
+    Ok(nodes.into_values().collect())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
