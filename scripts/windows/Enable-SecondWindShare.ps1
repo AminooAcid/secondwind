@@ -10,6 +10,13 @@
 # remains for manual/support use only.
 # Prints a one-line JSON result with the share name and account.
 
+# The plain-text-to-SecureString conversion is intentional: the password
+# reaches this elevated script through an owner-only, self-deleting file
+# (elevated processes don't inherit env vars; argv is world-readable), and
+# New-LocalUser only accepts a SecureString.
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+    "PSAvoidUsingConvertToSecureStringWithPlainText", "",
+    Justification = "Password is delivered via an owner-only temp file; see docs/DECISIONS.md (BUG-012).")]
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$FolderPath,
