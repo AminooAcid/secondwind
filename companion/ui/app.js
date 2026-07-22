@@ -200,6 +200,31 @@ async function toggleScreen() {
   }
 }
 
+function listenForAutoConnect() {
+  const listen = window.__TAURI__?.event?.listen;
+  if (!listen) {
+    return;
+  }
+
+  listen("secondwind://node-connected", (event) => {
+    const payload = event.payload ?? {};
+    if (payload.node_uuid) {
+      state.screenOn.set(payload.node_uuid, true);
+    }
+    setStatus(payload.message ?? "Node connected.");
+    render();
+  });
+
+  listen("secondwind://node-disconnected", (event) => {
+    const payload = event.payload ?? {};
+    if (payload.node_uuid) {
+      state.screenOn.set(payload.node_uuid, false);
+    }
+    setStatus(payload.message ?? "Node disconnected.");
+    render();
+  });
+}
+
 elements.refreshNodes.addEventListener("click", refreshNodes);
 elements.pairNode.addEventListener("click", pairSelectedNode);
 elements.pinInput.addEventListener("keydown", (event) => {
@@ -209,5 +234,6 @@ elements.pinInput.addEventListener("keydown", (event) => {
 });
 elements.screenToggle.addEventListener("click", toggleScreen);
 
+listenForAutoConnect();
 render();
 refreshPaired().then(refreshNodes);

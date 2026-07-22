@@ -1,11 +1,20 @@
 pub mod apollo;
+pub mod auto_connect;
 pub mod discovery;
 pub mod host_state;
 pub mod node_client;
 pub mod screen_control;
 
 pub fn run() {
+    let active_screens = auto_connect::new_active_screens();
+    let watcher_screens = active_screens.clone();
+
     tauri::Builder::default()
+        .manage(active_screens)
+        .setup(move |app| {
+            auto_connect::spawn(app.handle().clone(), watcher_screens.clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::discover_nodes,
             commands::pair_node,
@@ -16,32 +25,15 @@ pub fn run() {
         .expect("failed to run SecondWind companion");
 }
 
-mod commands {
-    use std::{path::PathBuf, time::Duration};
+/// Helpers shared by the command handlers and the auto-connect watcher.
+pub(crate) mod commands_support {
+    use std::path::PathBuf;
 
-    use serde::Serialize;
-    use sw_core::{NodeUuid, PairingPin, PairingRequest};
     use tauri::Manager;
 
-    use crate::{
-        discovery::{self, DiscoveredNode},
-        host_state::HostState,
-        node_client::{self, NodeEndpoint},
-        screen_control,
-    };
+    pub const STATE_DIR_ENV: &str = "SECONDWIND_COMPANION_STATE_DIR";
 
-    const DISCOVERY_BROWSE_WINDOW_MS: u64 = 900;
-    const STATE_DIR_ENV: &str = "SECONDWIND_COMPANION_STATE_DIR";
-
-    #[derive(Debug, Clone, Serialize)]
-    pub struct PairedNodeSummary {
-        pub node_uuid: NodeUuid,
-        pub display_name: String,
-        pub node_certificate_fingerprint: String,
-        pub screen_always_on: bool,
-    }
-
-    fn state_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    pub fn state_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         if let Ok(dir) = std::env::var(STATE_DIR_ENV) {
             if !dir.trim().is_empty() {
                 return Ok(PathBuf::from(dir));
@@ -53,8 +45,37 @@ mod commands {
             .map_err(|_| "SecondWind could not find a place to store its settings.".to_string())
     }
 
-    fn load_host_state(app: &tauri::AppHandle) -> Result<HostState, String> {
-        HostState::load_or_create(state_root(app)?).map_err(|error| error.to_string())
+    pub fn load_host_state(
+        app: &tauri::AppHandle,
+    ) -> Result<crate::host_state::HostState, String> {
+        crate::host_state::HostState::load_or_create(state_root(app)?)
+            .map_err(|error| error.to_string())
+    }
+}
+
+mod commands {
+    use std::time::Duration;
+
+    use serde::Serialize;
+    use sw_core::{NodeUuid, PairingPin, PairingRequest};
+
+    use crate::{
+        auto_connect::ActiveScreens,
+        commands_support::{load_host_state, state_root},
+        discovery::{self, DiscoveredNode},
+        host_state::HostState,
+        node_client::{self, NodeEndpoint},
+        screen_control,
+    };
+
+    const DISCOVERY_BROWSE_WINDOW_MS: u64 = 900;
+
+    #[derive(Debug, Clone, Serialize)]
+    pub struct PairedNodeSummary {
+        pub node_uuid: NodeUuid,
+        pub display_name: String,
+        pub node_certificate_fingerprint: String,
+        pub screen_always_on: bool,
     }
 
     fn summaries(state: &HostState) -> Vec<PairedNodeSummary> {
@@ -137,6 +158,7 @@ mod commands {
     #[tauri::command]
     pub fn set_screen(
         app: tauri::AppHandle,
+        screens: tauri::State<'_, ActiveScreens>,
         node: DiscoveredNode,
         enabled: bool,
     ) -> Result<ScreenToggleResult, String> {
@@ -158,8 +180,17 @@ mod commands {
                 .map_err(|error| error.to_string())?
         };
 
+        let streaming = matches!(response.screen, sw_core::ScreenState::Streaming { .. });
+        if let Ok(mut active) = screens.lock() {
+            if streaming {
+                active.insert(node.node_uuid);
+            } else {
+                active.remove(&node.node_uuid);
+            }
+        }
+
         Ok(ScreenToggleResult {
-            streaming: matches!(response.screen, sw_core::ScreenState::Streaming { .. }),
+            streaming,
             message: response.message,
         })
     }

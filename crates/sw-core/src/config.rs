@@ -7,7 +7,7 @@ use crate::capabilities::PanelMode;
 
 pub const CURRENT_CONFIG_VERSION: u16 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct NodeUuid(Uuid);
 
