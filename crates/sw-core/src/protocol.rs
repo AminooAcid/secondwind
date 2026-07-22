@@ -72,3 +72,46 @@ pub enum ScreenState {
     Idle,
     Streaming { host_address: String },
 }
+
+/// Host → node disk control (v0.2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiskCommandRequest {
+    pub action: DiskAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiskAction {
+    Enable,
+    Disable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiskStatusResponse {
+    pub disk: DiskState,
+    pub message: Option<String>,
+}
+
+/// Connection details for the node's exposed data disk. Only ever sent over
+/// the paired mTLS channel; the CHAP secret is generated on the node and is
+/// how the block layer authenticates the host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiskTarget {
+    pub target_iqn: String,
+    pub port: u16,
+    pub chap_username: String,
+    pub chap_secret: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum DiskState {
+    NotPaired,
+    /// The node has no designated data partition (or disk support is not
+    /// configured on this image).
+    Unavailable { reason: String },
+    /// Configured but not currently exported.
+    Ready,
+    /// Exported and reachable at the returned target.
+    Exposed { target: DiskTarget },
+}

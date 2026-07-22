@@ -8,4 +8,9 @@ systemctl enable avahi-daemon.service
 systemctl enable NetworkManager.service
 systemctl enable sw-agent.service
 systemctl enable sw-kiosk.service
+# Disk export: provisioning runs once on first boot; the export unit is
+# condition-guarded on the provisioned env file and started on demand by
+# the agent. Enabled so an exported disk survives reboots (v0.2).
+systemctl enable secondwind-disk-provision.service
+systemctl enable secondwind-disk.service
 systemctl set-default graphical.target

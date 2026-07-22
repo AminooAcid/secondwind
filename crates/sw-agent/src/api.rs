@@ -6,15 +6,17 @@ use std::{
 
 use axum::{Json, Router, extract::ConnectInfo, routing::get};
 use sw_core::{
-    CapabilitiesResponse, HealthResponse, KioskState, NodeCapabilities, NodeUuid, PairingRequest,
-    PairingResponse, PairingStatusResponse, ScreenAction, ScreenCapabilities,
-    ScreenCommandRequest, ScreenState, ScreenStatusResponse, ServiceStatus,
-    agent_api::{CAPABILITIES_PATH, HEALTH_PATH, PAIRING_PATH, SCREEN_PATH},
+    CapabilitiesResponse, DiskAction, DiskCommandRequest, DiskState, DiskStatusResponse,
+    HealthResponse, KioskState, NodeCapabilities, NodeUuid, PairingRequest, PairingResponse,
+    PairingStatusResponse, ScreenAction, ScreenCapabilities, ScreenCommandRequest, ScreenState,
+    ScreenStatusResponse, ServiceStatus,
+    agent_api::{CAPABILITIES_PATH, DISK_PATH, HEALTH_PATH, PAIRING_PATH, SCREEN_PATH},
     kiosk::write_kiosk_state,
 };
 
 use crate::{
     capability_detection::probe_vaapi_devices,
+    disk::{SharedDiskController, disk_state},
     identity::{PairedHostTrust, persist_paired_host},
     pairing_state::{PairingState, unavailable_pairing},
 };
@@ -30,6 +32,8 @@ pub struct AgentState {
     /// request carries one; consumed by the kiosk supervisor.
     pub stream_pair_pin: Arc<RwLock<Option<String>>>,
     pub kiosk_state_file: Option<PathBuf>,
+    /// v0.2 disk exposure; None when the image has no disk support wired.
+    pub disk: Option<SharedDiskController>,
 }
 
 impl AgentState {
@@ -61,7 +65,13 @@ impl AgentState {
             screen: Arc::new(RwLock::new(ScreenState::Idle)),
             stream_pair_pin: Arc::new(RwLock::new(None)),
             kiosk_state_file: None,
+            disk: None,
         }
+    }
+
+    pub fn with_disk_controller(mut self, disk: Option<SharedDiskController>) -> Self {
+        self.disk = disk;
+        self
     }
 
     pub fn with_identity_store(mut self, state_file: PathBuf) -> Self {
@@ -160,6 +170,7 @@ pub fn router(state: AgentState) -> Router {
         .route(CAPABILITIES_PATH, get(capabilities))
         .route(PAIRING_PATH, get(pairing_status).post(submit_pairing))
         .route(SCREEN_PATH, get(screen_status).post(screen_command))
+        .route(DISK_PATH, get(disk_status).post(disk_command))
         .with_state(state)
 }
 
@@ -200,6 +211,19 @@ pub async fn screen_command(
     Json(request): Json<ScreenCommandRequest>,
 ) -> Json<ScreenStatusResponse> {
     Json(apply_screen_command(&state, peer.ip().to_string(), request))
+}
+
+pub async fn disk_status(
+    axum::extract::State(state): axum::extract::State<AgentState>,
+) -> Json<DiskStatusResponse> {
+    Json(disk_status_response(&state))
+}
+
+pub async fn disk_command(
+    axum::extract::State(state): axum::extract::State<AgentState>,
+    Json(request): Json<DiskCommandRequest>,
+) -> Json<DiskStatusResponse> {
+    Json(apply_disk_command(&state, request))
 }
 
 pub fn health_response(state: &AgentState) -> HealthResponse {
@@ -331,6 +355,72 @@ pub fn apply_screen_command(
     screen_status_response(state)
 }
 
+fn is_paired(state: &AgentState) -> bool {
+    matches!(
+        &*state
+            .pairing
+            .read()
+            .expect("pairing state lock should not be poisoned"),
+        PairingState::Paired { .. }
+    )
+}
+
+pub fn disk_status_response(state: &AgentState) -> DiskStatusResponse {
+    if !is_paired(state) {
+        return DiskStatusResponse {
+            disk: DiskState::NotPaired,
+            message: Some("This node is not paired with a host yet.".to_string()),
+        };
+    }
+
+    match &state.disk {
+        None => DiskStatusResponse {
+            disk: DiskState::Unavailable {
+                reason: "This node has no SecondWind data disk configured.".to_string(),
+            },
+            message: None,
+        },
+        Some(controller) => DiskStatusResponse {
+            disk: disk_state(controller.as_ref()),
+            message: None,
+        },
+    }
+}
+
+pub fn apply_disk_command(state: &AgentState, request: DiskCommandRequest) -> DiskStatusResponse {
+    if !is_paired(state) {
+        return DiskStatusResponse {
+            disk: DiskState::NotPaired,
+            message: Some("Pair with this node before using the disk.".to_string()),
+        };
+    }
+
+    let Some(controller) = &state.disk else {
+        return DiskStatusResponse {
+            disk: DiskState::Unavailable {
+                reason: "This node has no SecondWind data disk configured.".to_string(),
+            },
+            message: None,
+        };
+    };
+
+    let result = match request.action {
+        DiskAction::Enable => controller.export(),
+        DiskAction::Disable => controller.unexport(),
+    };
+
+    match result {
+        Ok(()) => DiskStatusResponse {
+            disk: disk_state(controller.as_ref()),
+            message: None,
+        },
+        Err(error) => DiskStatusResponse {
+            disk: disk_state(controller.as_ref()),
+            message: Some(error.to_string()),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -371,6 +461,7 @@ mod tests {
             screen: Arc::new(RwLock::new(ScreenState::Idle)),
             stream_pair_pin: Arc::new(RwLock::new(None)),
             kiosk_state_file: None,
+            disk: None,
         }
     }
 
@@ -604,6 +695,68 @@ mod tests {
                 paired_host_name: "host".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn disk_requires_pairing() {
+        let state = test_state(Vec::new());
+
+        let response = apply_disk_command(
+            &state,
+            sw_core::DiskCommandRequest {
+                action: sw_core::DiskAction::Enable,
+            },
+        );
+
+        assert_eq!(response.disk, sw_core::DiskState::NotPaired);
+    }
+
+    #[test]
+    fn disk_without_controller_is_unavailable() {
+        let mut state = test_state(Vec::new());
+        state.pairing = Arc::new(RwLock::new(PairingState::paired("host".to_string())));
+
+        let response = disk_status_response(&state);
+
+        assert!(matches!(
+            response.disk,
+            sw_core::DiskState::Unavailable { .. }
+        ));
+    }
+
+    #[test]
+    fn disk_enable_exposes_target_with_chap_over_paired_channel() {
+        use crate::disk::test_support::{FakeDiskController, provisioned};
+
+        let mut state = test_state(Vec::new()).with_disk_controller(Some(Arc::new(
+            FakeDiskController {
+                provisioning: Some(provisioned()),
+                ..Default::default()
+            },
+        )));
+        state.pairing = Arc::new(RwLock::new(PairingState::paired("host".to_string())));
+
+        assert_eq!(disk_status_response(&state).disk, sw_core::DiskState::Ready);
+
+        let enabled = apply_disk_command(
+            &state,
+            sw_core::DiskCommandRequest {
+                action: sw_core::DiskAction::Enable,
+            },
+        );
+        let sw_core::DiskState::Exposed { target } = enabled.disk else {
+            panic!("expected exposed disk");
+        };
+        assert_eq!(target.target_iqn, "iqn.2026-07.app.secondwind:node-test");
+        assert_eq!(target.chap_username, "secondwind");
+
+        let disabled = apply_disk_command(
+            &state,
+            sw_core::DiskCommandRequest {
+                action: sw_core::DiskAction::Disable,
+            },
+        );
+        assert_eq!(disabled.disk, sw_core::DiskState::Ready);
     }
 
     #[test]

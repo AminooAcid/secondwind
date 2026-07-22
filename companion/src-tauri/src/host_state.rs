@@ -11,8 +11,8 @@ use std::{
 };
 
 use sw_core::{
-    CertificateMaterial, CertificateStoreError, HostConfig, NodeConfig, NodeTrust, NodeUuid,
-    ScreenConfig, SecondWindConfig, load_or_create_certificate,
+    CertificateMaterial, CertificateStoreError, DiskFeatureConfig, HostConfig, NodeConfig,
+    NodeTrust, NodeUuid, ScreenConfig, SecondWindConfig, load_or_create_certificate,
 };
 
 pub const CONFIG_FILE_NAME: &str = "config.json";
@@ -89,6 +89,7 @@ impl HostState {
                     preferred_panel_mode: None,
                     stream_paired: false,
                 },
+                disk: DiskFeatureConfig::default(),
             },
         );
         self.save()

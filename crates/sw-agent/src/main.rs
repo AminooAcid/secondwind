@@ -9,6 +9,7 @@ use sw_agent::{
     api::{AgentState, health_response, router},
     certificates::load_or_create_certificate,
     discovery::advertise_node,
+    disk::{SharedDiskController, SystemdDiskController},
     identity::load_or_create_identity,
     pairing_state::{PairingState, runtime_pairing_offer},
     tls::agent_tls_config,
@@ -39,10 +40,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             certificate.fingerprint.clone(),
         )?,
     };
+    let disk_controller: Option<SharedDiskController> = SystemdDiskController::from_env()
+        .map(|controller| std::sync::Arc::new(controller) as SharedDiskController);
     let state =
         AgentState::detect_with_pairing(identity.node_uuid, identity.node_name.clone(), pairing)
             .with_identity_store(runtime.state_file.clone())
-            .with_kiosk_state_file(runtime.kiosk_state_file.clone());
+            .with_kiosk_state_file(runtime.kiosk_state_file.clone())
+            .with_disk_controller(disk_controller);
     state.sync_kiosk();
 
     if let Some(bind_addr) = runtime.bind_addr {

@@ -1,0 +1,11 @@
+[Unit]
+Description=SecondWind data disk first-boot provisioning
+ConditionPathExists=!/etc/secondwind/disk.env
+Before=secondwind-disk.service sw-agent.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/secondwind/secondwind-disk-provision.sh
+
+[Install]
+WantedBy=multi-user.target

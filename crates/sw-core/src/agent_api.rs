@@ -2,6 +2,7 @@ pub const HEALTH_PATH: &str = "/v1/health";
 pub const CAPABILITIES_PATH: &str = "/v1/capabilities";
 pub const PAIRING_PATH: &str = "/v1/pairing";
 pub const SCREEN_PATH: &str = "/v1/screen";
+pub const DISK_PATH: &str = "/v1/disk";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentRoute {
@@ -9,6 +10,7 @@ pub enum AgentRoute {
     Capabilities,
     Pairing,
     Screen,
+    Disk,
 }
 
 impl AgentRoute {
@@ -18,6 +20,7 @@ impl AgentRoute {
             Self::Capabilities => CAPABILITIES_PATH,
             Self::Pairing => PAIRING_PATH,
             Self::Screen => SCREEN_PATH,
+            Self::Disk => DISK_PATH,
         }
     }
 }
@@ -33,6 +36,7 @@ mod tests {
             AgentRoute::Capabilities,
             AgentRoute::Pairing,
             AgentRoute::Screen,
+            AgentRoute::Disk,
         ] {
             assert!(route.path().starts_with("/v1/"));
         }

@@ -66,6 +66,26 @@ pub struct NodeConfig {
     pub display_name: String,
     pub trust: NodeTrust,
     pub screen: ScreenConfig,
+    /// v0.2 disk feature; defaulted so v0.1 configs migrate forward.
+    #[serde(default)]
+    pub disk: DiskFeatureConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiskFeatureConfig {
+    /// Bring the node disk up automatically with the link.
+    pub always_on: bool,
+    /// Preferred Windows drive letter; None lets Windows pick.
+    pub drive_letter: Option<char>,
+}
+
+impl Default for DiskFeatureConfig {
+    fn default() -> Self {
+        Self {
+            always_on: true,
+            drive_letter: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,6 +131,7 @@ mod tests {
                     }),
                     stream_paired: false,
                 },
+                disk: DiskFeatureConfig::default(),
             },
         );
 

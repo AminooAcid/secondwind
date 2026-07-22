@@ -10,6 +10,9 @@ moonlight-qt
 # Discovery.
 avahi-daemon
 
+# Disk feature (v0.2): LIO iSCSI target tooling.
+targetcli-fb
+
 # Capability detection + hardware video decode. All three VA-API drivers are
 # installed; the right one is chosen at runtime per GPU generation.
 libva-utils

@@ -1,6 +1,7 @@
 pub mod api;
 pub mod capability_detection;
 pub mod discovery;
+pub mod disk;
 pub mod identity;
 pub mod pairing_state;
 pub mod tls;

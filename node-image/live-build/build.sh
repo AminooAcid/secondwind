@@ -38,7 +38,15 @@ chmod 0755 "$HERE/config/includes.chroot/usr/local/bin/"*
 mkdir -p "$HERE/config/includes.chroot/etc/systemd/system"
 cp "$REPO_ROOT/node-image/systemd/sw-agent.service" \
    "$REPO_ROOT/node-image/systemd/sw-kiosk.service" \
+   "$REPO_ROOT/node-image/systemd/secondwind-disk.service" \
+   "$REPO_ROOT/node-image/systemd/secondwind-disk-provision.service" \
    "$HERE/config/includes.chroot/etc/systemd/system/"
+
+mkdir -p "$HERE/config/includes.chroot/usr/local/lib/secondwind"
+cp "$REPO_ROOT/scripts/node/secondwind-disk.sh" \
+   "$REPO_ROOT/scripts/node/secondwind-disk-provision.sh" \
+   "$HERE/config/includes.chroot/usr/local/lib/secondwind/"
+chmod 0755 "$HERE/config/includes.chroot/usr/local/lib/secondwind/"*.sh
 
 echo "==> 3/5 preparing the Moonlight apt repository for $DIST"
 sed "s/@DIST@/$DIST/" "$HERE/config/archives/moonlight.list.chroot.in" \
