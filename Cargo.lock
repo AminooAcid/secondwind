@@ -416,8 +416,10 @@ name = "sw-agent"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "serde",
  "serde_json",
  "sw-core",
+ "tokio",
 ]
 
 [[package]]

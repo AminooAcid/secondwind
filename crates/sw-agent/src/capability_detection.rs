@@ -92,7 +92,34 @@ pub enum VaApiProbeError {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
+    use std::{
+        fs::File,
+        path::{Path, PathBuf},
+    };
+
+    struct TempDirGuard(PathBuf);
+
+    impl TempDirGuard {
+        fn new(name: &str) -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "secondwind-render-devices-{}-{name}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&root);
+            fs::create_dir_all(&root).expect("create temp dir");
+            Self(root)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     use super::*;
 
@@ -125,7 +152,7 @@ libva info: Trying to open /usr/lib/x86_64-linux-gnu/dri/i965_drv_video.so
       VAProfileH264Main               : VAEntrypointEncSlice
 "#;
 
-        let probe = parse_vainfo(PathBuf::from("/dev/dri/renderD128"), output);
+        let probe = parse_vainfo(PathBuf::from("render-node-without-h264"), output);
 
         assert!(!probe.h264_decode);
         assert_eq!(probe.to_decoder_capability(), None);
@@ -133,24 +160,22 @@ libva info: Trying to open /usr/lib/x86_64-linux-gnu/dri/i965_drv_video.so
 
     #[test]
     fn render_device_listing_is_sorted_and_filtered() {
-        let root =
-            std::env::temp_dir().join(format!("secondwind-render-devices-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).expect("create temp dir");
+        let root = TempDirGuard::new("sorted-filtered");
 
-        File::create(root.join("card0")).expect("create card file");
-        File::create(root.join("renderD_beta")).expect("create render file");
-        File::create(root.join("renderD_alpha")).expect("create render file");
-        File::create(root.join("not-render")).expect("create other file");
+        File::create(root.path().join("card0")).expect("create card file");
+        File::create(root.path().join("renderD_beta")).expect("create render file");
+        File::create(root.path().join("renderD_alpha")).expect("create render file");
+        File::create(root.path().join("not-render")).expect("create other file");
 
-        let devices = render_devices_in(&root);
+        let devices = render_devices_in(root.path());
 
         assert_eq!(
             devices,
-            vec![root.join("renderD_alpha"), root.join("renderD_beta")]
+            vec![
+                root.path().join("renderD_alpha"),
+                root.path().join("renderD_beta")
+            ]
         );
-
-        fs::remove_dir_all(&root).expect("remove temp dir");
     }
 
     #[test]

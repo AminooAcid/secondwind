@@ -5,6 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+StateDirectory=secondwind
+Environment=SECONDWIND_AGENT_STATE_FILE=%S/secondwind/agent-state.json
+EnvironmentFile=-/etc/secondwind/sw-agent.env
 ExecStart=/usr/bin/sw-agent
 Restart=on-failure
 

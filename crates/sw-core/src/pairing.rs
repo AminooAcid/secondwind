@@ -64,3 +64,18 @@ mod tests {
         assert_eq!(PairingPin::new("12a456"), Err(PairingError::InvalidPin));
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairingStatusResponse {
+    pub status: PairingStatus,
+    pub offer: Option<PairingOffer>,
+    pub paired_host_name: Option<String>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PairingStatus {
+    Unavailable,
+    WaitingForHost,
+    Paired,
+}

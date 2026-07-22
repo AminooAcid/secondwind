@@ -55,6 +55,10 @@ Pairing and feature-control routes will be added as v0.1 implementation progress
 
 The first API slice provides these routes as an in-process router so behavior can be tested before choosing bind configuration. It does not hardcode a listening interface or port.
 
+Agent runtime configuration is supplied outside source. The agent reads its state-file path, optional bind address, and display name from environment/config so source does not bake in ports, interfaces, or machine-specific paths.
+
+Pairing routes currently expose explicit `Unavailable`, `WaitingForHost`, and `Paired` states. Certificate generation and mutual TLS are still upcoming v0.1 work; until certificate material exists, the agent must report pairing unavailable rather than fabricate trust.
+
 ## Capability Detection
 
 Capability detection must inspect the running machine. It must not assume:
