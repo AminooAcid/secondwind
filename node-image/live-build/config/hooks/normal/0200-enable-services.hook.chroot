@@ -20,6 +20,8 @@ systemctl enable sw-xpra-provision.service
 systemctl enable sw-xpra.service
 # USB: export daemon.
 systemctl enable secondwind-usbipd.service
-# Jobs: container runtime.
-systemctl enable docker.service
+# Jobs: container runtime, socket-activated so the ~150 MB Docker daemon
+# only starts when a job actually runs (keeps the idle node lean).
+systemctl disable docker.service 2>/dev/null || true
+systemctl enable docker.socket
 systemctl set-default graphical.target

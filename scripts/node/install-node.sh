@@ -189,6 +189,15 @@ systemctl daemon-reload
 # distro units to free the port and avoid a competing server.
 systemctl disable --now xpra-server.socket xpra-server.service 2>/dev/null || true
 systemctl mask xpra-server.socket xpra-server.service 2>/dev/null || true
+# Keep idle lean: Docker (Jobs) is socket-activated, started on first job.
+systemctl disable --now docker.service 2>/dev/null || true
+# Lean node (plan law #5): mask background services pulled in as deps that
+# a headless streaming node never needs. Frees ~60-90 MB at idle.
+for junk in cups-browsed cups printer-scan-daemon ModemManager \
+    bluetooth wpa_supplicant; do
+    systemctl disable --now "$junk" 2>/dev/null || true
+    systemctl mask "$junk" 2>/dev/null || true
+done
 sh "$INSTALL_DIR/node-image/live-build/config/hooks/normal/0200-enable-services.hook.chroot"
 systemctl restart sw-agent.service 2>/dev/null || true
 
