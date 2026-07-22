@@ -6,19 +6,25 @@ use std::{
 
 use axum::{Json, Router, extract::ConnectInfo, routing::get};
 use sw_core::{
+    AppLaunchRequest, AppLaunchResponse, AppSessionState, AppsStatusResponse,
     CapabilitiesResponse, DiskAction, DiskCommandRequest, DiskState, DiskStatusResponse,
     HealthResponse, KioskState, NodeCapabilities, NodeUuid, PairingRequest, PairingResponse,
     PairingStatusResponse, ScreenAction, ScreenCapabilities, ScreenCommandRequest, ScreenState,
-    ScreenStatusResponse, ServiceStatus,
-    agent_api::{CAPABILITIES_PATH, DISK_PATH, HEALTH_PATH, PAIRING_PATH, SCREEN_PATH},
+    ScreenStatusResponse, ServiceStatus, ShareConfigRequest, ShareState, ShareStatusResponse,
+    agent_api::{
+        APPS_PATH, CAPABILITIES_PATH, DISK_PATH, HEALTH_PATH, PAIRING_PATH, SCREEN_PATH,
+        SHARE_PATH,
+    },
     kiosk::write_kiosk_state,
 };
 
 use crate::{
+    apps::{SharedAppsController, app_infos},
     capability_detection::probe_vaapi_devices,
     disk::{SharedDiskController, disk_state},
     identity::{PairedHostTrust, persist_paired_host},
     pairing_state::{PairingState, unavailable_pairing},
+    share::{SharedShareController, share_state},
 };
 
 #[derive(Debug, Clone)]
@@ -34,6 +40,10 @@ pub struct AgentState {
     pub kiosk_state_file: Option<PathBuf>,
     /// v0.2 disk exposure; None when the image has no disk support wired.
     pub disk: Option<SharedDiskController>,
+    /// v0.3 seamless apps; None when the image has no app session wired.
+    pub apps: Option<SharedAppsController>,
+    /// v0.3 host share mount; None when the image has no share support.
+    pub share: Option<SharedShareController>,
 }
 
 impl AgentState {
@@ -67,11 +77,23 @@ impl AgentState {
             stream_pair_pin: Arc::new(RwLock::new(None)),
             kiosk_state_file: None,
             disk: None,
+            apps: None,
+            share: None,
         }
     }
 
     pub fn with_disk_controller(mut self, disk: Option<SharedDiskController>) -> Self {
         self.disk = disk;
+        self
+    }
+
+    pub fn with_apps_controller(mut self, apps: Option<SharedAppsController>) -> Self {
+        self.apps = apps;
+        self
+    }
+
+    pub fn with_share_controller(mut self, share: Option<SharedShareController>) -> Self {
+        self.share = share;
         self
     }
 
@@ -172,6 +194,8 @@ pub fn router(state: AgentState) -> Router {
         .route(PAIRING_PATH, get(pairing_status).post(submit_pairing))
         .route(SCREEN_PATH, get(screen_status).post(screen_command))
         .route(DISK_PATH, get(disk_status).post(disk_command))
+        .route(APPS_PATH, get(apps_status).post(launch_app))
+        .route(SHARE_PATH, get(share_status).post(configure_share))
         .with_state(state)
 }
 
@@ -225,6 +249,32 @@ pub async fn disk_command(
     Json(request): Json<DiskCommandRequest>,
 ) -> Json<DiskStatusResponse> {
     Json(apply_disk_command(&state, request))
+}
+
+pub async fn apps_status(
+    axum::extract::State(state): axum::extract::State<AgentState>,
+) -> Json<AppsStatusResponse> {
+    Json(apps_status_response(&state))
+}
+
+pub async fn launch_app(
+    axum::extract::State(state): axum::extract::State<AgentState>,
+    Json(request): Json<AppLaunchRequest>,
+) -> Json<AppLaunchResponse> {
+    Json(apply_app_launch(&state, request))
+}
+
+pub async fn share_status(
+    axum::extract::State(state): axum::extract::State<AgentState>,
+) -> Json<ShareStatusResponse> {
+    Json(share_status_response(&state))
+}
+
+pub async fn configure_share(
+    axum::extract::State(state): axum::extract::State<AgentState>,
+    Json(request): Json<ShareConfigRequest>,
+) -> Json<ShareStatusResponse> {
+    Json(apply_share_config(&state, request))
 }
 
 pub fn health_response(state: &AgentState) -> HealthResponse {
@@ -422,6 +472,142 @@ pub fn apply_disk_command(state: &AgentState, request: DiskCommandRequest) -> Di
     }
 }
 
+pub fn apps_status_response(state: &AgentState) -> AppsStatusResponse {
+    if !is_paired(state) {
+        return AppsStatusResponse {
+            session: AppSessionState::NotPaired,
+            apps: Vec::new(),
+            message: Some("This node is not paired with a host yet.".to_string()),
+        };
+    }
+
+    let Some(controller) = &state.apps else {
+        return AppsStatusResponse {
+            session: AppSessionState::Unavailable {
+                reason: "This node has no app session configured.".to_string(),
+            },
+            apps: Vec::new(),
+            message: None,
+        };
+    };
+
+    let session = match controller.session_endpoint() {
+        Some(endpoint) => AppSessionState::Ready { endpoint },
+        None => AppSessionState::Unavailable {
+            reason: "The node's app session is not ready yet.".to_string(),
+        },
+    };
+
+    AppsStatusResponse {
+        session,
+        apps: app_infos(controller.as_ref()),
+        message: None,
+    }
+}
+
+pub fn apply_app_launch(state: &AgentState, request: AppLaunchRequest) -> AppLaunchResponse {
+    if !is_paired(state) {
+        return AppLaunchResponse {
+            launched: false,
+            message: Some("Pair with this node before launching apps.".to_string()),
+        };
+    }
+
+    let Some(controller) = &state.apps else {
+        return AppLaunchResponse {
+            launched: false,
+            message: Some("This node has no app session configured.".to_string()),
+        };
+    };
+
+    // Whitelist resolution: only the node's own catalog is executable.
+    let Some(entry) = controller
+        .catalog()
+        .into_iter()
+        .find(|entry| entry.app_id == request.app_id)
+    else {
+        return AppLaunchResponse {
+            launched: false,
+            message: Some(format!(
+                "{} is not in this node's app library.",
+                request.app_id
+            )),
+        };
+    };
+
+    if !controller.is_installed(&entry.node_command) {
+        return AppLaunchResponse {
+            launched: false,
+            message: Some(format!(
+                "{} is not installed on this node.",
+                entry.display_name
+            )),
+        };
+    }
+
+    match controller.launch(&entry) {
+        Ok(()) => AppLaunchResponse {
+            launched: true,
+            message: None,
+        },
+        Err(error) => AppLaunchResponse {
+            launched: false,
+            message: Some(error.to_string()),
+        },
+    }
+}
+
+pub fn share_status_response(state: &AgentState) -> ShareStatusResponse {
+    if !is_paired(state) {
+        return ShareStatusResponse {
+            share: ShareState::NotPaired,
+            message: Some("This node is not paired with a host yet.".to_string()),
+        };
+    }
+
+    match &state.share {
+        None => ShareStatusResponse {
+            share: ShareState::Unavailable {
+                reason: "This node cannot mount the host share.".to_string(),
+            },
+            message: None,
+        },
+        Some(controller) => ShareStatusResponse {
+            share: share_state(controller.as_ref()),
+            message: None,
+        },
+    }
+}
+
+pub fn apply_share_config(state: &AgentState, request: ShareConfigRequest) -> ShareStatusResponse {
+    if !is_paired(state) {
+        return ShareStatusResponse {
+            share: ShareState::NotPaired,
+            message: Some("Pair with this node before sharing files.".to_string()),
+        };
+    }
+
+    let Some(controller) = &state.share else {
+        return ShareStatusResponse {
+            share: ShareState::Unavailable {
+                reason: "This node cannot mount the host share.".to_string(),
+            },
+            message: None,
+        };
+    };
+
+    match controller.configure_and_mount(&request) {
+        Ok(()) => ShareStatusResponse {
+            share: share_state(controller.as_ref()),
+            message: None,
+        },
+        Err(error) => ShareStatusResponse {
+            share: share_state(controller.as_ref()),
+            message: Some(error.to_string()),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -464,6 +650,8 @@ mod tests {
             stream_pair_pin: Arc::new(RwLock::new(None)),
             kiosk_state_file: None,
             disk: None,
+            apps: None,
+            share: None,
         }
     }
 
@@ -759,6 +947,94 @@ mod tests {
             },
         );
         assert_eq!(disabled.disk, sw_core::DiskState::Ready);
+    }
+
+    #[test]
+    fn apps_launch_rejects_unknown_and_uninstalled_apps() {
+        use crate::apps::test_support::FakeAppsController;
+
+        let mut state = test_state(Vec::new()).with_apps_controller(Some(Arc::new(
+            FakeAppsController {
+                endpoint: Some(sw_core::AppSessionEndpoint {
+                    port: 14500,
+                    password: "pass".to_string(),
+                }),
+                installed: vec!["vlc".to_string()],
+                ..Default::default()
+            },
+        )));
+        state.pairing = Arc::new(RwLock::new(PairingState::paired("host".to_string())));
+
+        let unknown = apply_app_launch(
+            &state,
+            sw_core::AppLaunchRequest {
+                app_id: "not-an-app".to_string(),
+            },
+        );
+        assert!(!unknown.launched);
+
+        let uninstalled = apply_app_launch(
+            &state,
+            sw_core::AppLaunchRequest {
+                app_id: "firefox".to_string(),
+            },
+        );
+        assert!(!uninstalled.launched);
+
+        let launched = apply_app_launch(
+            &state,
+            sw_core::AppLaunchRequest {
+                app_id: "vlc".to_string(),
+            },
+        );
+        assert!(launched.launched);
+    }
+
+    #[test]
+    fn apps_status_exposes_session_only_when_paired() {
+        use crate::apps::test_support::FakeAppsController;
+
+        let controller = Arc::new(FakeAppsController {
+            endpoint: Some(sw_core::AppSessionEndpoint {
+                port: 14500,
+                password: "pass".to_string(),
+            }),
+            ..Default::default()
+        });
+        let unpaired = test_state(Vec::new()).with_apps_controller(Some(controller.clone()));
+        assert!(matches!(
+            apps_status_response(&unpaired).session,
+            sw_core::AppSessionState::NotPaired
+        ));
+
+        let mut paired = test_state(Vec::new()).with_apps_controller(Some(controller));
+        paired.pairing = Arc::new(RwLock::new(PairingState::paired("host".to_string())));
+        let status = apps_status_response(&paired);
+        assert!(matches!(
+            status.session,
+            sw_core::AppSessionState::Ready { .. }
+        ));
+        assert!(!status.apps.is_empty());
+    }
+
+    #[test]
+    fn share_config_mounts_when_paired() {
+        use crate::share::test_support::FakeShareController;
+
+        let mut state = test_state(Vec::new())
+            .with_share_controller(Some(Arc::new(FakeShareController::default())));
+        state.pairing = Arc::new(RwLock::new(PairingState::paired("host".to_string())));
+
+        let response = apply_share_config(
+            &state,
+            sw_core::ShareConfigRequest {
+                unc_path: r"\\host\SecondWind".to_string(),
+                username: "SecondWindShare".to_string(),
+                password: "secret".to_string(),
+            },
+        );
+
+        assert_eq!(response.share, sw_core::ShareState::Mounted);
     }
 
     #[test]

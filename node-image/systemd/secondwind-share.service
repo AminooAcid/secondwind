@@ -1,0 +1,13 @@
+[Unit]
+Description=SecondWind host share mount
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/run/secondwind/share.env
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/run/secondwind/share.env
+EnvironmentFile=-/etc/secondwind/sw-share.env
+ExecStart=/usr/local/lib/secondwind/secondwind-share.sh up
+ExecStop=/usr/local/lib/secondwind/secondwind-share.sh down

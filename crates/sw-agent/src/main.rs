@@ -7,11 +7,13 @@ use std::{
 
 use sw_agent::{
     api::{AgentState, health_response, router},
+    apps::{SharedAppsController, XpraAppsController},
     certificates::load_or_create_certificate,
     discovery::advertise_node,
     disk::{SharedDiskController, SystemdDiskController},
     identity::load_or_create_identity,
     pairing_state::{PairingState, runtime_pairing_offer},
+    share::{SharedShareController, SystemdShareController},
     tls::agent_tls_config,
 };
 
@@ -42,11 +44,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
     let disk_controller: Option<SharedDiskController> = SystemdDiskController::from_env()
         .map(|controller| std::sync::Arc::new(controller) as SharedDiskController);
+    let apps_controller: Option<SharedAppsController> = XpraAppsController::from_env()
+        .map(|controller| std::sync::Arc::new(controller) as SharedAppsController);
+    let share_controller: Option<SharedShareController> = SystemdShareController::from_env()
+        .map(|controller| std::sync::Arc::new(controller) as SharedShareController);
     let state =
         AgentState::detect_with_pairing(identity.node_uuid, identity.node_name.clone(), pairing)
             .with_identity_store(runtime.state_file.clone())
             .with_kiosk_state_file(runtime.kiosk_state_file.clone())
-            .with_disk_controller(disk_controller);
+            .with_disk_controller(disk_controller)
+            .with_apps_controller(apps_controller)
+            .with_share_controller(share_controller);
     state.sync_kiosk();
 
     if let Some(bind_addr) = runtime.bind_addr {

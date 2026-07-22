@@ -1,0 +1,11 @@
+[Unit]
+Description=SecondWind app session first-boot provisioning
+Before=sw-xpra.service sw-agent.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/secondwind/sw-xpra.env
+ExecStart=/usr/local/lib/secondwind/secondwind-xpra-provision.sh
+
+[Install]
+WantedBy=multi-user.target

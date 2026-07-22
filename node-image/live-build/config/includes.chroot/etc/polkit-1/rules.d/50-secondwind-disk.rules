@@ -1,9 +1,12 @@
-// Allow the unprivileged SecondWind agent to start/stop exactly the disk
-// export unit — nothing else.
+// Allow the unprivileged SecondWind agent to start/stop exactly the units
+// it orchestrates — nothing else.
 polkit.addRule(function (action, subject) {
     if (action.id == "org.freedesktop.systemd1.manage-units" &&
-        action.lookup("unit") == "secondwind-disk.service" &&
         subject.user == "secondwind") {
-        return polkit.Result.YES;
+        var unit = action.lookup("unit");
+        if (unit == "secondwind-disk.service" ||
+            unit == "secondwind-share.service") {
+            return polkit.Result.YES;
+        }
     }
 });

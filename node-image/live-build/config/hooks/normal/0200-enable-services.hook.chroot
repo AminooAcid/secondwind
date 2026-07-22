@@ -13,4 +13,7 @@ systemctl enable sw-kiosk.service
 # the agent. Enabled so an exported disk survives reboots (v0.2).
 systemctl enable secondwind-disk-provision.service
 systemctl enable secondwind-disk.service
+# Apps: one supervised session; password regenerated each boot.
+systemctl enable sw-xpra-provision.service
+systemctl enable sw-xpra.service
 systemctl set-default graphical.target

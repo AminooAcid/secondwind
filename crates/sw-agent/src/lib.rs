@@ -1,9 +1,11 @@
 pub mod api;
+pub mod apps;
 pub mod capability_detection;
 pub mod discovery;
 pub mod disk;
 pub mod identity;
 pub mod pairing_state;
+pub mod share;
 pub mod tls;
 
 /// Certificate storage/generation is shared peer logic and lives in

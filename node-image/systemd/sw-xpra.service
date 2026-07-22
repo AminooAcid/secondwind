@@ -1,0 +1,24 @@
+[Unit]
+Description=SecondWind seamless app session
+After=network-online.target sw-xpra-provision.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=secondwind
+Group=secondwind
+Environment=SECONDWIND_XPRA_DISPLAY=:100
+EnvironmentFile=-/etc/secondwind/sw-xpra.env
+# One headless session all node apps run inside; the host's client attaches
+# over TCP with the first-boot-generated password. Bind address/port come
+# from the env file, never from source.
+ExecStart=/bin/sh -c 'exec xpra start "$SECONDWIND_XPRA_DISPLAY" --daemon=no \
+    --bind-tcp=0.0.0.0:"$SECONDWIND_XPRA_PORT" \
+    --auth=file:filename="$SECONDWIND_XPRA_PASSWORD_FILE" \
+    --mdns=no --webcam=no --pulseaudio=no --notifications=no \
+    --system-tray=no --clipboard=yes'
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

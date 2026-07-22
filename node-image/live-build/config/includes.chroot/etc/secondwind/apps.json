@@ -1,0 +1,56 @@
+[
+  {
+    "app_id": "firefox",
+    "display_name": "Firefox",
+    "node_command": "firefox",
+    "local_command": "firefox.exe",
+    "policy": "ask_each_time",
+    "fallback_to_local": true,
+    "synced_profile": ".mozilla"
+  },
+  {
+    "app_id": "chromium",
+    "display_name": "Chromium",
+    "node_command": "chromium",
+    "local_command": "chrome.exe",
+    "policy": "ask_each_time",
+    "fallback_to_local": true,
+    "synced_profile": ".config/chromium"
+  },
+  {
+    "app_id": "vlc",
+    "display_name": "VLC",
+    "node_command": "vlc",
+    "local_command": "vlc.exe",
+    "policy": "ask_each_time",
+    "fallback_to_local": true,
+    "synced_profile": null
+  },
+  {
+    "app_id": "libreoffice",
+    "display_name": "LibreOffice",
+    "node_command": "libreoffice",
+    "local_command": "soffice.exe",
+    "policy": "ask_each_time",
+    "fallback_to_local": true,
+    "synced_profile": null
+  },
+  {
+    "app_id": "gimp",
+    "display_name": "GIMP",
+    "node_command": "gimp",
+    "local_command": "gimp.exe",
+    "policy": "ask_each_time",
+    "fallback_to_local": true,
+    "synced_profile": null
+  },
+  {
+    "app_id": "pdf-reader",
+    "display_name": "PDF Reader",
+    "node_command": "evince",
+    "local_command": null,
+    "policy": "ask_each_time",
+    "fallback_to_local": true,
+    "synced_profile": null
+  }
+]
