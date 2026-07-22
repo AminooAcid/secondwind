@@ -218,10 +218,33 @@ pub fn load_or_create_credentials(
     }
 }
 
+/// Registers dashboard credentials with Apollo via `sunshine.exe --creds`.
+///
+/// Critically, this **stops the service first** so `--creds` is the only
+/// `sunshine` process touching Apollo's credential/state files. Running it
+/// against a live service corrupted the credentials file on hardware
+/// (Apollo then crash-looped before its web UI could bind). The service is
+/// left stopped; the caller restarts it.
 fn set_apollo_credentials(
     installation: &ApolloInstallation,
     credentials: &ApolloCredentials,
 ) -> Result<(), ApolloError> {
+    if let Some(name) = installed_service_name() {
+        let _ = Command::new("sc.exe").args(["stop", &name]).status();
+        let stop_deadline = std::time::Instant::now() + Duration::from_secs(45);
+        while service_state(&name) != ServiceState::Stopped {
+            if std::time::Instant::now() >= stop_deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        // Kill any stray sunshine so nothing else writes the state files.
+        let _ = Command::new("taskkill")
+            .args(["/F", "/IM", "sunshine.exe"])
+            .status();
+        std::thread::sleep(Duration::from_millis(500));
+    }
+
     let status = Command::new(&installation.executable)
         .arg("--creds")
         .arg(&credentials.username)
