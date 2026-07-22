@@ -16,3 +16,5 @@ Thumbs.db
 *.crt
 *.p12
 /.tmp/
+/companion/src-tauri/target/
+/companion/src-tauri/gen/

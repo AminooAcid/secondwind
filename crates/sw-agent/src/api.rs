@@ -1,4 +1,7 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    path::PathBuf,
+    sync::{Arc, RwLock},
+};
 
 use axum::{Json, Router, routing::get};
 use sw_core::{
@@ -9,6 +12,7 @@ use sw_core::{
 
 use crate::{
     capability_detection::probe_vaapi_devices,
+    identity::{PairedHostTrust, persist_paired_host},
     pairing_state::{PairingState, unavailable_pairing},
 };
 
@@ -17,6 +21,7 @@ pub struct AgentState {
     pub node_uuid: NodeUuid,
     pub capabilities: NodeCapabilities,
     pub pairing: Arc<RwLock<PairingState>>,
+    pub identity_store: Option<AgentIdentityStore>,
 }
 
 impl AgentState {
@@ -44,7 +49,13 @@ impl AgentState {
                 },
             },
             pairing: Arc::new(RwLock::new(pairing)),
+            identity_store: None,
         }
+    }
+
+    pub fn with_identity_store(mut self, state_file: PathBuf) -> Self {
+        self.identity_store = Some(AgentIdentityStore { state_file });
+        self
     }
 
     pub fn service_status(&self) -> ServiceStatus {
@@ -53,6 +64,20 @@ impl AgentState {
         } else {
             ServiceStatus::Degraded
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentIdentityStore {
+    state_file: PathBuf,
+}
+
+impl AgentIdentityStore {
+    pub fn persist_paired_host(
+        &self,
+        paired_host: PairedHostTrust,
+    ) -> Result<(), crate::identity::IdentityStoreError> {
+        persist_paired_host(&self.state_file, paired_host).map(|_| ())
     }
 }
 
@@ -112,16 +137,43 @@ pub fn pairing_status_response(state: &AgentState) -> PairingStatusResponse {
 }
 
 pub fn submit_pairing_request(state: &AgentState, request: PairingRequest) -> PairingResponse {
+    let result = state
+        .pairing
+        .read()
+        .expect("pairing state lock should not be poisoned")
+        .prepare_submit_request(request);
+
+    let Some(paired_host) = result.paired_host else {
+        return result.response;
+    };
+
+    if let Some(identity_store) = &state.identity_store {
+        if identity_store
+            .persist_paired_host(paired_host.clone())
+            .is_err()
+        {
+            return PairingResponse {
+                accepted: false,
+                node_certificate_fingerprint: result.response.node_certificate_fingerprint,
+            };
+        }
+    }
+
     state
         .pairing
         .write()
         .expect("pairing state lock should not be poisoned")
-        .submit_request(request)
+        .mark_paired(paired_host.host_name);
+
+    result.response
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, RwLock};
+    use std::{
+        fs,
+        sync::{Arc, RwLock},
+    };
 
     use sw_core::{
         DecodeApi, PairingOffer, PairingPin, PairingStatus, PanelMode, VideoCodec,
@@ -129,7 +181,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::pairing_state::PairingState;
+    use crate::{
+        identity::{AgentIdentity, PairedHostTrust, load_or_create_identity, write_identity},
+        pairing_state::PairingState,
+    };
 
     fn test_state(decoders: Vec<VideoDecoderCapability>) -> AgentState {
         AgentState {
@@ -149,6 +204,7 @@ mod tests {
             pairing: Arc::new(RwLock::new(PairingState::Unavailable {
                 reason: "test".to_string(),
             })),
+            identity_store: None,
         }
     }
 
@@ -237,6 +293,47 @@ mod tests {
         assert_eq!(
             pairing_status_response(&state).status,
             PairingStatus::Paired
+        );
+    }
+
+    #[test]
+    fn pairing_request_persists_host_trust_before_marking_paired() {
+        let state_file = std::env::temp_dir().join(format!(
+            "secondwind-api-identity-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&state_file);
+        write_identity(
+            &state_file,
+            &AgentIdentity {
+                node_uuid: NodeUuid::new("00000000-0000-4000-8000-000000000004")
+                    .expect("valid uuid"),
+                node_name: "node".to_string(),
+                paired_host: None,
+            },
+        )
+        .expect("write identity");
+        let mut state = test_state(Vec::new()).with_identity_store(state_file.clone());
+        state.pairing = Arc::new(RwLock::new(waiting_pairing_state()));
+
+        let response = submit_pairing_request(
+            &state,
+            PairingRequest {
+                host_name: "host".to_string(),
+                host_certificate_fingerprint: "host-fingerprint".to_string(),
+                pin: PairingPin::new("123456").expect("valid pin"),
+            },
+        );
+        let identity = load_or_create_identity(&state_file, "unused").expect("load identity");
+        let _ = fs::remove_file(&state_file);
+
+        assert!(response.accepted);
+        assert_eq!(
+            identity.paired_host.expect("paired host"),
+            PairedHostTrust {
+                host_name: "host".to_string(),
+                host_certificate_fingerprint: "host-fingerprint".to_string(),
+            }
         );
     }
 

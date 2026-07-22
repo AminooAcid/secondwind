@@ -8,6 +8,7 @@ repository.workspace = true
 [dependencies]
 axum = "0.8"
 base64 = "0.22"
+getrandom = "0.2"
 hex = "0.4"
 rcgen = "0.13"
 serde.workspace = true

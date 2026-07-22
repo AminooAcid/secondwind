@@ -10,6 +10,8 @@ use sw_core::NodeUuid;
 pub struct AgentIdentity {
     pub node_uuid: NodeUuid,
     pub node_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paired_host: Option<PairedHostTrust>,
 }
 
 impl AgentIdentity {
@@ -17,8 +19,15 @@ impl AgentIdentity {
         Self {
             node_uuid: NodeUuid::new_v4(),
             node_name,
+            paired_host: None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairedHostTrust {
+    pub host_name: String,
+    pub host_certificate_fingerprint: String,
 }
 
 pub fn load_or_create_identity(
@@ -42,6 +51,22 @@ pub fn load_or_create_identity(
             source,
         }),
     }
+}
+
+pub fn persist_paired_host(
+    state_file: impl AsRef<Path>,
+    paired_host: PairedHostTrust,
+) -> Result<AgentIdentity, IdentityStoreError> {
+    let state_file = state_file.as_ref();
+    let contents = fs::read_to_string(state_file).map_err(|source| IdentityStoreError::Read {
+        path: state_file.to_path_buf(),
+        source,
+    })?;
+    let mut identity =
+        serde_json::from_str(&contents).map_err(|source| IdentityStoreError::Parse { source })?;
+    identity.paired_host = Some(paired_host);
+    write_identity(state_file, &identity)?;
+    Ok(identity)
 }
 
 pub fn write_identity(
@@ -76,42 +101,110 @@ pub enum IdentityStoreError {
 mod tests {
     use super::*;
 
-    fn test_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "secondwind-identity-{}-{name}.json",
-            std::process::id()
-        ))
+    struct TempIdentityFile {
+        path: PathBuf,
+    }
+
+    impl TempIdentityFile {
+        fn new(name: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "secondwind-identity-{}-{name}.json",
+                std::process::id()
+            ));
+            let _ = fs::remove_file(&path);
+            Self { path }
+        }
+    }
+
+    impl Drop for TempIdentityFile {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.path);
+        }
     }
 
     #[test]
     fn creates_identity_when_missing() {
-        let path = test_path("creates");
-        let _ = fs::remove_file(&path);
+        let file = TempIdentityFile::new("creates");
 
-        let identity =
-            load_or_create_identity(&path, "node-name").expect("create identity on first boot");
+        let identity = load_or_create_identity(&file.path, "node-name")
+            .expect("create identity on first boot");
 
         assert_eq!(identity.node_name, "node-name");
-        assert!(path.exists());
-
-        let _ = fs::remove_file(path);
+        assert!(identity.paired_host.is_none());
+        assert!(file.path.exists());
     }
 
     #[test]
     fn keeps_existing_identity() {
-        let path = test_path("keeps");
-        let _ = fs::remove_file(&path);
+        let file = TempIdentityFile::new("keeps");
         let original = AgentIdentity {
             node_uuid: NodeUuid::new("00000000-0000-4000-8000-000000000003").expect("valid uuid"),
             node_name: "original".to_string(),
+            paired_host: None,
         };
-        write_identity(&path, &original).expect("write identity");
+        write_identity(&file.path, &original).expect("write identity");
 
-        let loaded = load_or_create_identity(&path, "different").expect("load existing identity");
+        let loaded =
+            load_or_create_identity(&file.path, "different").expect("load existing identity");
 
         assert_eq!(loaded, original);
+    }
 
-        let _ = fs::remove_file(path);
+    #[test]
+    fn loads_legacy_identity_without_paired_host() {
+        let file = TempIdentityFile::new("legacy");
+        fs::write(
+            &file.path,
+            r#"{
+  "node_uuid": "00000000-0000-4000-8000-000000000003",
+  "node_name": "legacy"
+}"#,
+        )
+        .expect("write legacy identity");
+
+        let loaded = load_or_create_identity(&file.path, "different").expect("load legacy");
+
+        assert_eq!(loaded.node_name, "legacy");
+        assert!(loaded.paired_host.is_none());
+    }
+
+    #[test]
+    fn persists_paired_host_trust() {
+        let file = TempIdentityFile::new("trust");
+        let original = AgentIdentity {
+            node_uuid: NodeUuid::new("00000000-0000-4000-8000-000000000003").expect("valid uuid"),
+            node_name: "node".to_string(),
+            paired_host: None,
+        };
+        write_identity(&file.path, &original).expect("write identity");
+
+        persist_paired_host(
+            &file.path,
+            PairedHostTrust {
+                host_name: "host".to_string(),
+                host_certificate_fingerprint: "sha256:host".to_string(),
+            },
+        )
+        .expect("persist host trust");
+        let loaded = load_or_create_identity(&file.path, "different").expect("load identity");
+
+        assert_eq!(loaded.node_uuid, original.node_uuid);
+        assert_eq!(loaded.paired_host.expect("paired host").host_name, "host");
+    }
+    #[test]
+    fn persisting_paired_host_requires_existing_identity() {
+        let file = TempIdentityFile::new("missing-trust");
+
+        let error = persist_paired_host(
+            &file.path,
+            PairedHostTrust {
+                host_name: "host".to_string(),
+                host_certificate_fingerprint: "sha256:host".to_string(),
+            },
+        )
+        .expect_err("missing identity should fail");
+
+        assert!(matches!(error, IdentityStoreError::Read { .. }));
     }
 }
 

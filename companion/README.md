@@ -10,7 +10,7 @@ v0.1 responsibilities:
 - Expose a Screen toggle.
 - Configure and supervise the host-side screen path without exposing Apollo's browser UI.
 
-This folder is scaffolded only. The full Tauri app will be added after the shared core and node-agent API settle.
+This folder is scaffolded only. The Tauri manifest and Rust entrypoint exist so the companion has a real app boundary; the full UI will be implemented as the shared core and node-agent API settle.
 
 ## Agent API Contract
 

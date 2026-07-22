@@ -4,7 +4,7 @@ use sw_agent::{
     api::{AgentState, health_response, router},
     certificates::load_or_create_certificate,
     identity::load_or_create_identity,
-    pairing_state::runtime_pairing_offer,
+    pairing_state::{PairingState, runtime_pairing_offer},
 };
 
 const STATE_FILE_ENV: &str = "SECONDWIND_AGENT_STATE_FILE";
@@ -23,12 +23,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &runtime.private_key_file,
         identity.node_uuid.to_string(),
     )?;
-    let pairing = runtime_pairing_offer(
-        identity.node_uuid,
-        identity.node_name.clone(),
-        certificate.fingerprint,
-    );
-    let state = AgentState::detect_with_pairing(identity.node_uuid, identity.node_name, pairing);
+    let pairing = match &identity.paired_host {
+        Some(paired_host) => PairingState::paired(paired_host.host_name.clone()),
+        None => runtime_pairing_offer(
+            identity.node_uuid,
+            identity.node_name.clone(),
+            certificate.fingerprint,
+        )?,
+    };
+    let state = AgentState::detect_with_pairing(identity.node_uuid, identity.node_name, pairing)
+        .with_identity_store(runtime.state_file.clone());
 
     if let Some(bind_addr) = runtime.bind_addr {
         let listener = tokio::net::TcpListener::bind(bind_addr).await?;

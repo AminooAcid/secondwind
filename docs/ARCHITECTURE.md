@@ -7,6 +7,7 @@ SecondWind is a Windows companion plus a Debian node image. The companion and no
 - `sw-core`: shared protocol, config, pairing, and capability types.
 - `sw-agent`: node daemon. It owns node state, capability detection, pairing, local service supervision, and the node API.
 - `sw-launcher`: host-side launch helper scaffold. It exists now so later phases have the planned crate boundary.
+- `sw-kiosk`: node kiosk scaffold. It matches the kiosk systemd unit and will own the node-local pairing/status/streaming screen.
 - `companion`: Windows companion UI and Rust core. It owns pairing, discovery, host-side state, feature toggles, and user-visible errors.
 - `node-image`: Debian image configuration. It will include the agent, kiosk, Moonlight client path, and required system services.
 
@@ -57,7 +58,7 @@ The first API slice provides these routes as an in-process router so behavior ca
 
 Agent runtime configuration is supplied outside source. The agent reads its state-file path, certificate path, key path, optional bind address, and display name from environment/config so source does not bake in ports, interfaces, or machine-specific paths.
 
-Pairing routes currently expose explicit `Unavailable`, `WaitingForHost`, and `Paired` states. The agent generates and persists node certificate material from externally supplied paths, then exposes the node certificate fingerprint and QR-ready payload in pairing state. Mutual TLS and paired-host trust storage are still upcoming v0.1 work.
+Pairing routes currently expose explicit `Unavailable`, `WaitingForHost`, and `Paired` states. The agent generates and persists node certificate material from externally supplied paths, self-heals interrupted certificate/key writes, then exposes the node certificate fingerprint and QR-ready payload in pairing state. Paired-host trust is persisted before the live state is marked paired. Mutual TLS is still upcoming v0.1 work.
 
 ## Capability Detection
 

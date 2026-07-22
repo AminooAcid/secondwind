@@ -21,36 +21,36 @@ pub fn load_or_create_certificate(
 ) -> Result<NodeCertificate, CertificateStoreError> {
     let certificate_file = certificate_file.as_ref();
     let private_key_file = private_key_file.as_ref();
+    let subject_name = subject_name.into();
 
     match (
         fs::read_to_string(certificate_file),
         fs::read_to_string(private_key_file),
     ) {
         (Ok(certificate_pem), Ok(private_key_pem)) => {
-            let fingerprint = certificate_fingerprint(&certificate_pem)?;
-            Ok(NodeCertificate {
-                certificate_pem,
-                private_key_pem,
-                fingerprint,
-            })
+            match certificate_fingerprint(&certificate_pem) {
+                Ok(fingerprint) => Ok(NodeCertificate {
+                    certificate_pem,
+                    private_key_pem,
+                    fingerprint,
+                }),
+                Err(CertificateStoreError::InvalidPem) => {
+                    regenerate_certificate_files(certificate_file, private_key_file, subject_name)
+                }
+                Err(error) => Err(error),
+            }
         }
         (Err(cert_error), Err(key_error))
             if cert_error.kind() == io::ErrorKind::NotFound
                 && key_error.kind() == io::ErrorKind::NotFound =>
         {
-            let generated = generate_certificate(subject_name.into())?;
-            write_certificate_files(certificate_file, private_key_file, &generated)?;
-            Ok(generated)
+            regenerate_certificate_files(certificate_file, private_key_file, subject_name)
         }
         (Err(error), _) if error.kind() == io::ErrorKind::NotFound => {
-            Err(CertificateStoreError::IncompleteStore {
-                missing_path: certificate_file.to_path_buf(),
-            })
+            regenerate_certificate_files(certificate_file, private_key_file, subject_name)
         }
         (_, Err(error)) if error.kind() == io::ErrorKind::NotFound => {
-            Err(CertificateStoreError::IncompleteStore {
-                missing_path: private_key_file.to_path_buf(),
-            })
+            regenerate_certificate_files(certificate_file, private_key_file, subject_name)
         }
         (Err(source), _) => Err(CertificateStoreError::Read {
             path: certificate_file.to_path_buf(),
@@ -68,6 +68,16 @@ pub fn certificate_fingerprint(certificate_pem: &str) -> Result<String, Certific
     let digest = Sha256::digest(certificate_der);
 
     Ok(format!("sha256:{}", hex::encode_upper(digest)))
+}
+
+fn regenerate_certificate_files(
+    certificate_file: &Path,
+    private_key_file: &Path,
+    subject_name: String,
+) -> Result<NodeCertificate, CertificateStoreError> {
+    let generated = generate_certificate(subject_name)?;
+    write_certificate_files(certificate_file, private_key_file, &generated)?;
+    Ok(generated)
 }
 
 fn generate_certificate(subject_name: String) -> Result<NodeCertificate, CertificateStoreError> {
@@ -146,7 +156,6 @@ pub enum CertificateStoreError {
     Read { path: PathBuf, source: io::Error },
     Write { path: PathBuf, source: io::Error },
     Generate { source: String },
-    IncompleteStore { missing_path: PathBuf },
     InvalidPem,
 }
 
@@ -168,11 +177,6 @@ impl std::fmt::Display for CertificateStoreError {
                 )
             }
             Self::Generate { .. } => write!(formatter, "failed to generate node certificate"),
-            Self::IncompleteStore { missing_path } => write!(
-                formatter,
-                "certificate store is incomplete; missing {}",
-                missing_path.display()
-            ),
             Self::InvalidPem => write!(formatter, "certificate file is not valid PEM"),
         }
     }
@@ -182,7 +186,7 @@ impl std::error::Error for CertificateStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Read { source, .. } | Self::Write { source, .. } => Some(source),
-            Self::Generate { .. } | Self::IncompleteStore { .. } | Self::InvalidPem => None,
+            Self::Generate { .. } | Self::InvalidPem => None,
         }
     }
 }
@@ -257,22 +261,39 @@ mod tests {
     }
 
     #[test]
-    fn rejects_incomplete_certificate_store() {
+    fn regenerates_incomplete_certificate_store() {
         let files = TempFileSet::new("incomplete");
         fs::create_dir_all(files.certificate_file.parent().expect("root"))
             .expect("create temp dir");
-        fs::write(&files.certificate_file, "not used").expect("write cert");
+        fs::write(&files.certificate_file, "orphaned cert").expect("write cert");
 
-        let error = load_or_create_certificate(
+        let certificate = load_or_create_certificate(
             &files.certificate_file,
             &files.private_key_file,
             "node-uuid",
         )
-        .expect_err("incomplete store fails");
+        .expect("self-heal incomplete store");
 
-        assert!(matches!(
-            error,
-            CertificateStoreError::IncompleteStore { .. }
-        ));
+        assert!(files.certificate_file.exists());
+        assert!(files.private_key_file.exists());
+        assert!(certificate.fingerprint.starts_with("sha256:"));
+    }
+
+    #[test]
+    fn regenerates_invalid_certificate_pem() {
+        let files = TempFileSet::new("invalid-pem");
+        fs::create_dir_all(files.certificate_file.parent().expect("root"))
+            .expect("create temp dir");
+        fs::write(&files.certificate_file, "not pem").expect("write cert");
+        fs::write(&files.private_key_file, "key exists").expect("write key");
+
+        let certificate = load_or_create_certificate(
+            &files.certificate_file,
+            &files.private_key_file,
+            "node-uuid",
+        )
+        .expect("self-heal invalid cert");
+
+        assert!(certificate.fingerprint.starts_with("sha256:"));
     }
 }

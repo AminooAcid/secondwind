@@ -4,6 +4,7 @@ members = [
     "crates/sw-core",
     "crates/sw-agent",
     "crates/sw-launcher",
+    "crates/sw-kiosk",
 ]
 
 [workspace.package]

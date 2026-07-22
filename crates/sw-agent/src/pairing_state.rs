@@ -1,3 +1,4 @@
+use crate::identity::PairedHostTrust;
 use sw_core::{
     PairingOffer, PairingPin, PairingQrPayload, PairingRequest, PairingResponse, PairingStatus,
     PairingStatusResponse,
@@ -13,6 +14,10 @@ pub enum PairingState {
 impl PairingState {
     pub fn waiting(offer: PairingOffer) -> Self {
         Self::Waiting { offer }
+    }
+
+    pub fn paired(host_name: String) -> Self {
+        Self::Paired { host_name }
     }
 
     pub fn status_response(&self) -> PairingStatusResponse {
@@ -41,31 +46,48 @@ impl PairingState {
         }
     }
 
-    pub fn submit_request(&mut self, request: PairingRequest) -> PairingResponse {
+    pub fn prepare_submit_request(&self, request: PairingRequest) -> PairingSubmitResult {
         let Self::Waiting { offer } = self else {
-            return PairingResponse {
-                accepted: false,
-                node_certificate_fingerprint: String::new(),
+            return PairingSubmitResult {
+                response: PairingResponse {
+                    accepted: false,
+                    node_certificate_fingerprint: String::new(),
+                },
+                paired_host: None,
             };
         };
 
         if request.pin != offer.pin {
-            return PairingResponse {
-                accepted: false,
-                node_certificate_fingerprint: offer.certificate_fingerprint.clone(),
+            return PairingSubmitResult {
+                response: PairingResponse {
+                    accepted: false,
+                    node_certificate_fingerprint: offer.certificate_fingerprint.clone(),
+                },
+                paired_host: None,
             };
         }
 
-        let node_certificate_fingerprint = offer.certificate_fingerprint.clone();
-        *self = Self::Paired {
-            host_name: request.host_name,
-        };
-
-        PairingResponse {
-            accepted: true,
-            node_certificate_fingerprint,
+        PairingSubmitResult {
+            response: PairingResponse {
+                accepted: true,
+                node_certificate_fingerprint: offer.certificate_fingerprint.clone(),
+            },
+            paired_host: Some(PairedHostTrust {
+                host_name: request.host_name,
+                host_certificate_fingerprint: request.host_certificate_fingerprint,
+            }),
         }
     }
+
+    pub fn mark_paired(&mut self, host_name: String) {
+        *self = Self::Paired { host_name };
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairingSubmitResult {
+    pub response: PairingResponse,
+    pub paired_host: Option<PairedHostTrust>,
 }
 
 pub fn unavailable_pairing() -> PairingState {
@@ -78,19 +100,47 @@ pub fn runtime_pairing_offer(
     node_uuid: sw_core::NodeUuid,
     node_name: String,
     certificate_fingerprint: String,
-) -> PairingState {
-    PairingState::waiting(PairingOffer {
+) -> Result<PairingState, PairingPinGenerationError> {
+    Ok(PairingState::waiting(PairingOffer {
         node_uuid,
         node_name,
         certificate_fingerprint,
-        pin: generate_pairing_pin(),
-    })
+        pin: generate_pairing_pin()?,
+    }))
 }
 
-pub fn generate_pairing_pin() -> PairingPin {
-    let value = sw_core::NodeUuid::new_v4().as_uuid().as_u128() % 1_000_000;
-    PairingPin::new(format!("{value:06}")).expect("generated pairing PIN should be six digits")
+pub fn generate_pairing_pin() -> Result<PairingPin, PairingPinGenerationError> {
+    const PIN_SPACE: u64 = 1_000_000;
+    let random_range = u32::MAX as u64 + 1;
+    let unbiased_limit = random_range - (random_range % PIN_SPACE);
+
+    loop {
+        let mut bytes = [0_u8; 4];
+        getrandom::getrandom(&mut bytes).map_err(PairingPinGenerationError::Random)?;
+        let value = u32::from_le_bytes(bytes) as u64;
+        if value < unbiased_limit {
+            return PairingPin::new(format!("{:06}", value % PIN_SPACE))
+                .map_err(|_| PairingPinGenerationError::InvalidGeneratedPin);
+        }
+    }
 }
+
+#[derive(Debug)]
+pub enum PairingPinGenerationError {
+    Random(getrandom::Error),
+    InvalidGeneratedPin,
+}
+
+impl std::fmt::Display for PairingPinGenerationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Random(_) => write!(formatter, "failed to generate pairing PIN randomness"),
+            Self::InvalidGeneratedPin => write!(formatter, "generated pairing PIN was invalid"),
+        }
+    }
+}
+
+impl std::error::Error for PairingPinGenerationError {}
 
 pub fn fixed_pin_for_tests() -> PairingPin {
     PairingPin::new("123456").expect("fixed test pin is valid")
@@ -116,7 +166,7 @@ mod tests {
 
     #[test]
     fn generated_pin_is_six_digits() {
-        let pin = generate_pairing_pin();
+        let pin = generate_pairing_pin().expect("generate pin");
 
         assert_eq!(pin.expose_for_pairing_display().len(), 6);
         assert!(
@@ -133,7 +183,8 @@ mod tests {
             node_uuid,
             "node".to_string(),
             "sha256:fingerprint".to_string(),
-        );
+        )
+        .expect("runtime offer");
 
         let PairingState::Waiting { offer } = state else {
             panic!("expected waiting state");
@@ -153,16 +204,32 @@ mod tests {
     }
 
     #[test]
-    fn matching_pin_accepts_and_marks_paired() {
-        let mut state = waiting_state();
+    fn matching_pin_prepares_paired_host_trust_without_mutating() {
+        let state = waiting_state();
 
-        let response = state.submit_request(PairingRequest {
+        let result = state.prepare_submit_request(PairingRequest {
             host_name: "host".to_string(),
             host_certificate_fingerprint: "host-fingerprint".to_string(),
             pin: fixed_pin_for_tests(),
         });
 
-        assert!(response.accepted);
+        assert!(result.response.accepted);
+        assert_eq!(
+            result
+                .paired_host
+                .expect("paired host")
+                .host_certificate_fingerprint,
+            "host-fingerprint"
+        );
+        assert!(matches!(state, PairingState::Waiting { .. }));
+    }
+
+    #[test]
+    fn mark_paired_updates_state_after_trust_is_persisted() {
+        let mut state = waiting_state();
+
+        state.mark_paired("host".to_string());
+
         assert!(matches!(state, PairingState::Paired { .. }));
         assert_eq!(
             state.status_response().paired_host_name.as_deref(),
@@ -172,15 +239,16 @@ mod tests {
 
     #[test]
     fn mismatched_pin_rejects() {
-        let mut state = waiting_state();
+        let state = waiting_state();
 
-        let response = state.submit_request(PairingRequest {
+        let result = state.prepare_submit_request(PairingRequest {
             host_name: "host".to_string(),
             host_certificate_fingerprint: "host-fingerprint".to_string(),
             pin: PairingPin::new("654321").expect("valid pin"),
         });
 
-        assert!(!response.accepted);
+        assert!(!result.response.accepted);
+        assert!(result.paired_host.is_none());
         assert!(matches!(state, PairingState::Waiting { .. }));
     }
 }
