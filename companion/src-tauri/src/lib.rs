@@ -6,6 +6,7 @@ pub mod disk_control;
 pub mod host_state;
 pub mod node_client;
 pub mod screen_control;
+pub mod usb_control;
 
 pub fn run() {
     let active_screens = auto_connect::new_active_screens();
@@ -26,6 +27,9 @@ pub fn run() {
             commands::app_library,
             commands::set_app_policy,
             commands::launch_app,
+            commands::usb_devices,
+            commands::set_usb_attached,
+            commands::set_usb_auto_attach,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SecondWind companion");
@@ -73,7 +77,7 @@ mod commands {
         disk_control,
         host_state::HostState,
         node_client::{self, NodeEndpoint},
-        screen_control,
+        screen_control, usb_control,
     };
 
     const DISCOVERY_BROWSE_WINDOW_MS: u64 = 900;
@@ -340,6 +344,109 @@ mod commands {
             endpoint,
             &node_uuid,
         ))
+    }
+
+    fn paired_endpoint_for(
+        state: &HostState,
+        node: &DiscoveredNode,
+    ) -> Result<NodeEndpoint, String> {
+        screen_control::paired_endpoint(
+            state,
+            &node.node_uuid,
+            node.addresses.clone(),
+            node.api_port,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    /// Node USB device merged with the host-side auto-attach rule.
+    #[derive(Debug, Clone, Serialize)]
+    pub struct UsbDeviceView {
+        #[serde(flatten)]
+        pub device: sw_core::UsbDeviceInfo,
+        pub auto_attach: bool,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    pub struct UsbDevicesView {
+        pub usb: sw_core::UsbState,
+        pub devices: Vec<UsbDeviceView>,
+        pub message: Option<String>,
+    }
+
+    #[tauri::command]
+    pub fn usb_devices(
+        app: tauri::AppHandle,
+        node: DiscoveredNode,
+    ) -> Result<UsbDevicesView, String> {
+        let state = load_host_state(&app)?;
+        let endpoint = paired_endpoint_for(&state, &node)?;
+        let response = node_client::get_usb_devices(&endpoint, Some(&state.certificate))
+            .map_err(|error| error.to_string())?;
+
+        let rules = state
+            .paired_node(&node.node_uuid)
+            .map(|paired| paired.usb_auto_attach.clone())
+            .unwrap_or_default();
+        let devices = response
+            .devices
+            .into_iter()
+            .map(|device| UsbDeviceView {
+                auto_attach: rules.iter().any(|rule| {
+                    rule.vendor_id == device.vendor_id && rule.product_id == device.product_id
+                }),
+                device,
+            })
+            .collect();
+
+        Ok(UsbDevicesView {
+            usb: response.usb,
+            devices,
+            message: response.message,
+        })
+    }
+
+    #[tauri::command]
+    pub fn set_usb_attached(
+        app: tauri::AppHandle,
+        node: DiscoveredNode,
+        bus_id: String,
+        vendor_id: String,
+        product_id: String,
+        attached: bool,
+    ) -> Result<(), String> {
+        let state = load_host_state(&app)?;
+        let endpoint = paired_endpoint_for(&state, &node)?;
+
+        if attached {
+            usb_control::attach_device(&state, &endpoint, &bus_id).map(|_| ())
+        } else {
+            usb_control::detach_device(&state, &endpoint, &bus_id, &vendor_id, &product_id)
+        }
+    }
+
+    #[tauri::command]
+    pub fn set_usb_auto_attach(
+        app: tauri::AppHandle,
+        node_uuid: NodeUuid,
+        vendor_id: String,
+        product_id: String,
+        enabled: bool,
+    ) -> Result<(), String> {
+        let mut state = load_host_state(&app)?;
+        let Some(node) = state.config.nodes.get_mut(&node_uuid) else {
+            return Err("Pair with this node first.".to_string());
+        };
+
+        node.usb_auto_attach
+            .retain(|rule| !(rule.vendor_id == vendor_id && rule.product_id == product_id));
+        if enabled {
+            node.usb_auto_attach.push(sw_core::UsbAutoAttachRule {
+                vendor_id,
+                product_id,
+            });
+        }
+        state.save().map_err(|error| error.to_string())
     }
 
     #[cfg(test)]

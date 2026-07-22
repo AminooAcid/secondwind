@@ -18,7 +18,10 @@ use sw_core::{
     AppLaunchRequest, AppLaunchResponse, AppsStatusResponse, CapabilitiesResponse,
     CertificateMaterial, DiskCommandRequest, DiskStatusResponse, PairingRequest, PairingResponse,
     ScreenCommandRequest, ScreenStatusResponse, ShareConfigRequest, ShareStatusResponse,
-    agent_api::{APPS_PATH, CAPABILITIES_PATH, DISK_PATH, PAIRING_PATH, SCREEN_PATH, SHARE_PATH},
+    UsbCommandRequest, UsbDevicesResponse,
+    agent_api::{
+        APPS_PATH, CAPABILITIES_PATH, DISK_PATH, PAIRING_PATH, SCREEN_PATH, SHARE_PATH, USB_PATH,
+    },
     certificate_der_from_pem, fingerprint_of_der,
 };
 
@@ -276,6 +279,21 @@ pub fn post_app_launch(
     request: &AppLaunchRequest,
 ) -> Result<AppLaunchResponse, NodeClientError> {
     post_json(endpoint, client_identity, APPS_PATH, request)
+}
+
+pub fn get_usb_devices(
+    endpoint: &NodeEndpoint,
+    client_identity: Option<&CertificateMaterial>,
+) -> Result<UsbDevicesResponse, NodeClientError> {
+    get_json(endpoint, client_identity, USB_PATH)
+}
+
+pub fn post_usb_command(
+    endpoint: &NodeEndpoint,
+    client_identity: Option<&CertificateMaterial>,
+    request: &UsbCommandRequest,
+) -> Result<UsbDevicesResponse, NodeClientError> {
+    post_json(endpoint, client_identity, USB_PATH, request)
 }
 
 pub fn post_share_config(

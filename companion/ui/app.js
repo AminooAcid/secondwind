@@ -1,6 +1,8 @@
 const state = {
   nodes: [],
   apps: [],
+  // Devices of the selected paired node, refreshed on selection.
+  usbDevices: [],
   // app_id -> true while a launch is in flight or awaiting a choice
   appPendingChoice: new Set(),
   selectedNodeUuid: null,
@@ -31,6 +33,7 @@ const elements = {
   diskToggle: document.querySelector("#diskToggle"),
   statusLine: document.querySelector("#statusLine"),
   appList: document.querySelector("#appList"),
+  usbList: document.querySelector("#usbList"),
 };
 
 function tauriInvoke(command, args) {
@@ -89,6 +92,7 @@ function renderNodes() {
     item.addEventListener("click", () => {
       state.selectedNodeUuid = node.node_uuid;
       render();
+      refreshUsb();
     });
 
     elements.nodeList.append(item);
@@ -251,10 +255,123 @@ async function launchApp(app, choiceOnNode) {
   render();
 }
 
+function renderUsb() {
+  elements.usbList.innerHTML = "";
+  const node = selectedNode();
+  if (!node || !isPaired(node.node_uuid)) {
+    const empty = document.createElement("div");
+    empty.className = "node-subtitle";
+    empty.textContent = "Pair with the node to see its USB ports.";
+    elements.usbList.append(empty);
+    return;
+  }
+
+  if (state.usbDevices.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "node-subtitle";
+    empty.textContent = "No USB devices plugged into the node.";
+    elements.usbList.append(empty);
+    return;
+  }
+
+  for (const device of state.usbDevices) {
+    const row = document.createElement("div");
+    row.className = "usb-row";
+    row.setAttribute("role", "listitem");
+
+    const name = document.createElement("span");
+    name.className = "usb-name";
+    name.textContent = device.description || `${device.vendor_id}:${device.product_id}`;
+
+    const attach = document.createElement("button");
+    attach.type = "button";
+    attach.textContent = device.bound ? "Detach" : "Attach";
+    attach.disabled = state.busy;
+    attach.addEventListener("click", () => toggleUsb(device));
+
+    const autoLabel = document.createElement("label");
+    autoLabel.className = "auto";
+    const auto = document.createElement("input");
+    auto.type = "checkbox";
+    auto.checked = Boolean(device.auto_attach);
+    auto.addEventListener("change", () => setUsbAuto(device, auto.checked));
+    autoLabel.append(auto, document.createTextNode("Always attach"));
+
+    row.append(name, attach, autoLabel);
+    elements.usbList.append(row);
+  }
+}
+
+async function refreshUsb() {
+  const node = selectedNode();
+  if (!node || !isPaired(node.node_uuid)) {
+    state.usbDevices = [];
+    renderUsb();
+    return;
+  }
+
+  try {
+    const response = await tauriInvoke("usb_devices", { node });
+    state.usbDevices = response.devices ?? [];
+  } catch (error) {
+    state.usbDevices = [];
+  }
+  renderUsb();
+}
+
+async function toggleUsb(device) {
+  const node = selectedNode();
+  if (!node) {
+    return;
+  }
+
+  state.busy = true;
+  render();
+  setStatus(device.bound ? "Detaching the device…" : "Attaching the device…");
+
+  try {
+    await tauriInvoke("set_usb_attached", {
+      node,
+      busId: device.bus_id,
+      vendorId: device.vendor_id,
+      productId: device.product_id,
+      attached: !device.bound,
+    });
+    setStatus(device.bound ? "Device detached." : "Device attached — check Explorer.");
+  } catch (error) {
+    setStatus(String(error));
+  } finally {
+    state.busy = false;
+    await refreshUsb();
+    render();
+  }
+}
+
+async function setUsbAuto(device, enabled) {
+  const node = selectedNode();
+  if (!node) {
+    return;
+  }
+
+  try {
+    await tauriInvoke("set_usb_auto_attach", {
+      nodeUuid: node.node_uuid,
+      vendorId: device.vendor_id,
+      productId: device.product_id,
+      enabled,
+    });
+    device.auto_attach = enabled;
+    setStatus(enabled ? "This device will attach automatically." : "Auto-attach turned off.");
+  } catch (error) {
+    setStatus(String(error));
+  }
+}
+
 function render() {
   renderNodes();
   renderDetail();
   renderApps();
+  renderUsb();
 }
 
 async function refreshPaired() {
@@ -307,6 +424,7 @@ async function pairSelectedNode() {
     state.paired.set(summary.node_uuid, summary);
     elements.pinInput.value = "";
     setStatus(`Paired with ${summary.display_name}.`);
+    refreshUsb();
   } catch (error) {
     setStatus(String(error));
   } finally {

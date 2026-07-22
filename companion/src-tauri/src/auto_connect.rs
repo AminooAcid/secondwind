@@ -273,6 +273,26 @@ fn auto_bring_up(
         }
     }
 
+    // USB auto-attach rules (v0.4): best-effort, last in the bring-up order.
+    let rules = state
+        .paired_node(&node.node_uuid)
+        .map(|paired| paired.usb_auto_attach.clone())
+        .unwrap_or_default();
+    if !rules.is_empty() {
+        if let Ok(devices) =
+            crate::node_client::get_usb_devices(&endpoint, Some(&state.certificate))
+        {
+            for device in devices.devices {
+                let wanted = rules.iter().any(|rule| {
+                    rule.vendor_id == device.vendor_id && rule.product_id == device.product_id
+                });
+                if wanted && !device.bound {
+                    let _ = crate::usb_control::attach_device(&state, &endpoint, &device.bus_id);
+                }
+            }
+        }
+    }
+
     Ok(Some(outcome))
 }
 

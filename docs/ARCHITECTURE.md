@@ -77,6 +77,17 @@ JSON over HTTPS, versioned under `/v1/`, mutual TLS after pairing. The agent bin
 | `/v1/share` | GET | share mount state |
 | `/v1/share` | POST | configure + mount the host share |
 
+## USB (v0.4)
+
+- Node: `usbipd` runs from the image; the agent lists local devices (`usbip list -l` parser, unit-tested), reports bound state from the export driver's sysfs dir, and binds/unbinds via a root wrapper script. The unprivileged agent reaches the wrapper through a sudoers rule scoped to exactly that script; bus ids are charset-validated on both sides of the privilege boundary.
+- Host: the companion drives the bundled usbip-win2 client — attach by node address + bus id, detach by port looked up from `usbip port` (parser unit-tested). Windows driver trust is a one-time step documented in `docs/USB-SETUP.md`.
+- Auto-attach: per-node rules match vendor:product (port-independent); auto-connect attaches matching devices last in the bring-up order. The device list + Attach/Detach + "Always attach" live in the node detail panel.
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/v1/usb` | GET | local device list + bound state (paired only) |
+| `/v1/usb` | POST | bind/unbind a device for export |
+
 ## Capability Detection
 
 Capability detection inspects the running machine and never assumes GPU model, render device order, codec support, panel modes, interface names, paths, or addresses. The VA-API probe enumerates `/dev/dri/renderD*`, runs `vainfo` per node, and counts H.264 decode only on `VAEntrypointVLD`. (Phase 0 proof: the working decoder was not the first render device.)

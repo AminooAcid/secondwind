@@ -6,6 +6,12 @@ Format: newest first. Each entry has a date, the decision, the reasoning, and st
 
 ---
 
+## 2026-07-21 — v0.4 usb choices
+
+- **USB bind/unbind privilege goes through one sudoers-scoped wrapper script**, mirroring the polkit-per-unit pattern used for disk/share; bus ids are validated against a conservative charset in the agent *and* in the wrapper. *Status: accepted.*
+- **Auto-attach rules match vendor:product, not bus id.** Users think "my flash drive", not "port 1-1.4"; matching survives replugging into a different port. *Status: accepted.*
+- **Host detach resolves the local port from `usbip port` output** by vendor:product; parser unit-tested, exact output format to verify against the bundled usbip-win2 release on hardware. *Status: accepted.*
+
 ## 2026-07-21 — v0.3 apps choices
 
 - **One persistent node app session (xpra) instead of per-app sessions.** Single supervised unit, one attach from the host, `xpra control start` per launch; per-boot random password shared over mTLS only. *Status: accepted; `xpra control` flags to verify on hardware.*

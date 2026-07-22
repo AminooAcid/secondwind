@@ -3,6 +3,15 @@
 All notable changes to SecondWind. Format loosely follows Keep a Changelog;
 versions are tagged only after their phase acceptance passes on hardware.
 
+## [Unreleased — v0.4 code-complete]
+
+### Added
+- USB feature end-to-end: node `usbipd` + agent `GET`/`POST /v1/usb`
+  (device list with bound state; bind/unbind through a sudoers-scoped,
+  input-validated root wrapper), companion attach/detach via the bundled
+  usbip-win2 client, per-device "Always attach" rules applied by
+  auto-connect, and `docs/USB-SETUP.md` for the one-time driver-trust step.
+
 ## [Unreleased — v0.3 code-complete]
 
 ### Added
