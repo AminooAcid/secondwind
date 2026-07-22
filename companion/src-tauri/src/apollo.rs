@@ -89,6 +89,14 @@ pub fn detect_installation() -> Option<ApolloInstallation> {
 
 /// The SecondWind-managed configuration for Apollo. Only keys SecondWind
 /// owns; everything else in the user's config file is preserved verbatim.
+/// Base port. Apollo/Sunshine derive every port from this: the dashboard
+/// API is `BASE + 1`. Pinning it to the default keeps the API on 47990 and
+/// stops the base from drifting (it silently shifted to 48009 on hardware
+/// when two sunshine processes raced for ports, moving the API to 48010 and
+/// breaking every call to the hardcoded 47990).
+pub const APOLLO_BASE_PORT: u16 = 47989;
+pub const APOLLO_API_PORT: u16 = APOLLO_BASE_PORT + 1;
+
 pub fn managed_config_entries(host_display_name: &str) -> Vec<(String, String)> {
     vec![
         // The name Moonlight clients see; branded so the node kiosk logs
@@ -99,6 +107,8 @@ pub fn managed_config_entries(host_display_name: &str) -> Vec<(String, String)> 
         ),
         // The link is local; never poke holes in the router.
         ("upnp".to_string(), "off".to_string()),
+        // Pin the port so the dashboard API stays on 47990.
+        ("port".to_string(), APOLLO_BASE_PORT.to_string()),
     ]
 }
 
