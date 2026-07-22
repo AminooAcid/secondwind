@@ -3,6 +3,20 @@
 All notable changes to SecondWind. Format loosely follows Keep a Changelog;
 versions are tagged only after their phase acceptance passes on hardware.
 
+## [Unreleased — git-based node delivery]
+
+### Changed
+- Primary node install is now Git-based: `scripts/node/install-node.sh`
+  turns a stock Debian minimal install into a node (packages, Moonlight
+  repo, services, prebuilt binaries from the `node-rolling` GitHub
+  release) and updates it on re-run. Guide: `docs/NODE-SETUP.md`. The
+  flashable ISO moves to the backlog as the polished 1.0 path.
+
+### Added
+- `release-node.yml`: CI builds `sw-agent`/`sw-kiosk` in a Debian
+  bookworm container on every push to main and refreshes the rolling
+  release the installer downloads.
+
 ## [Unreleased — architecture-review response]
 
 ### Added

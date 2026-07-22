@@ -1,0 +1,52 @@
+name: Node binaries
+
+# Publishes prebuilt sw-agent + sw-kiosk for the node installer script.
+# Every push to main refreshes the rolling prerelease (`node-rolling`);
+# version tags get their own release. Built in a Debian bookworm container
+# so the binaries run on Debian stable and newer (older glibc than any
+# supported node).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    container: rust:1-bookworm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build node binaries
+        run: cargo build --release -p sw-agent -p sw-kiosk
+
+      - name: Package
+        run: |
+          tar -czf sw-node-linux-x86_64.tar.gz -C target/release sw-agent sw-kiosk
+          sha256sum sw-node-linux-x86_64.tar.gz > sw-node-linux-x86_64.tar.gz.sha256
+
+      - name: Publish rolling prerelease (main)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: node-rolling
+          name: "Node binaries (rolling)"
+          prerelease: true
+          body: >
+            Latest node binaries from `main`, consumed by
+            `scripts/node/install-node.sh`. Not a versioned release.
+          files: |
+            sw-node-linux-x86_64.tar.gz
+            sw-node-linux-x86_64.tar.gz.sha256
+
+      - name: Publish versioned release (tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            sw-node-linux-x86_64.tar.gz
+            sw-node-linux-x86_64.tar.gz.sha256

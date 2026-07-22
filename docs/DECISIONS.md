@@ -6,6 +6,15 @@ Format: newest first. Each entry has a date, the decision, the reasoning, and st
 
 ---
 
+## 2026-07-22 — node delivery switched to Git-based install (product-owner decision)
+
+The plan's §3 "one flashable image" is **amended by the product owner**: the primary node delivery is now `scripts/node/install-node.sh` — install stock Debian minimal once (guide already exists from Phase 0), then one command clones/updates the repo, installs packages, and pulls prebuilt `sw-agent`/`sw-kiosk` from the `node-rolling` GitHub release (built by CI in a Debian bookworm container so glibc always matches Debian stable+). Re-running the script updates the node.
+
+- Reasoning: during hardware validation an ISO per iteration is the slowest possible loop; the script path gives updates for free and is easier for everyone to try. The product law "user never touches a terminal" now applies *after* node setup for this phase; the two-command install is copy-paste with expected-result lines.
+- The ISO (`node-image/`) is kept and demoted to `docs/BACKLOG.md` as the polished 1.0 path — the script and the image install the same units/configs from the same sources, so they cannot drift apart structurally.
+- Config files under `/etc/secondwind/` are never overwritten on update (`install` only when missing); binaries and units always refresh. Disk feature activates only when a `SECONDWIND_DATA`-labeled partition exists.
+*Status: accepted.*
+
 ## 2026-07-22 — architecture-review response (apply vs defer)
 
 An external review proposed nine improvements. Triage rule: apply what fixes a defect or fills a spec gap now; defer big rewrites until after the first hardware validation; reject what duplicates upstream or reopens locked decisions. Deferred items live in `docs/BACKLOG.md` with unblock conditions.

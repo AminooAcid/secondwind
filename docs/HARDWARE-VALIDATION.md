@@ -6,13 +6,20 @@ the corresponding section below passes on the first physical pair
 (`docs/PROFILE-dev-machine.md`). Log results (working or not) in
 `docs/COMPATIBILITY.md`; fix-ups get normal commits.
 
-Every step assumes: ISO built with `node-image/live-build/build.sh`,
-installed on the node via the guided dual-boot flow; companion running on
-the host.
+Every step assumes: Debian minimal installed on the node (FIRST-SETUP
+steps A–B), then `scripts/node/install-node.sh` run per
+`docs/NODE-SETUP.md`; companion running on the host. (The ISO path in
+`node-image/` is the 1.0 alternative — see BACKLOG.)
+
+## v0.0 — Install path itself
+
+- [ ] `install-node.sh` completes on a fresh Debian minimal install
+      (packages, Moonlight repo, `node-rolling` binaries download).
+- [ ] Re-running it updates cleanly and keeps `/etc/secondwind/` edits.
 
 ## v0.1 — Screen + pairing + auto-connect
 
-- [ ] Fresh node boot reaches the SecondWind pairing screen (QR + PIN), no terminal.
+- [ ] After reboot the node reaches the SecondWind pairing screen (QR + PIN), no terminal.
 - [ ] Companion discovers the node; PIN pairs; kiosk flips to the idle screen.
 - [ ] Apollo layer: managed config block accepted by the installed Apollo version; credentials + PIN arming work against its localhost API (`companion/src-tauri/src/apollo.rs` holds the keys/endpoints to adjust).
 - [ ] Screen toggle: virtual display appears matching the node panel; windows reflow on disconnect.

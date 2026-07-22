@@ -31,13 +31,18 @@ real hardware and is documented in `docs/COMPATIBILITY.md`.
 ## Quickstart (developer preview)
 
 1. **Host:** build and run the companion — `cd companion/src-tauri && cargo tauri dev` (needs Rust + the Tauri prerequisites; see `docs/SETUP-DEV.md`).
-2. **Node:** build the ISO on a Debian machine — `cd node-image/live-build && sudo ./build.sh` — then boot it on the old laptop (dual-boot install is the guided default and only ever uses the free space you chose).
+2. **Node:** install plain Debian (minimal, no desktop) on the old laptop once, then run the one-command installer — see `docs/NODE-SETUP.md`:
+
+   ```sh
+   wget -qO /tmp/install-node.sh https://raw.githubusercontent.com/AminooAcid/secondwind/main/scripts/node/install-node.sh
+   sudo sh /tmp/install-node.sh
+   ```
+
+   Re-running the same command later **updates** the node. (A flashable
+   all-in-one ISO also exists in `node-image/` and returns as the polished
+   1.0 path.)
 3. The node shows a SecondWind pairing screen; the companion finds it; enter the PIN.
 4. Toggle **Screen** on (or just replug the link — it's automatic after pairing).
-
-The finished product wraps steps 1–2 in a Windows installer and a
-flashable image; the user path is install → flash → pair → done, with no
-terminal anywhere.
 
 ## Repository layout
 

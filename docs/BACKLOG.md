@@ -7,6 +7,12 @@ hardware validation (`docs/HARDWARE-VALIDATION.md`).
 
 ## After hardware validation
 
+- **Flashable all-in-one node ISO as the polished install path.** The
+  live-build tree (`node-image/`) is complete and stays maintained; the
+  primary path for now is the Git-based `install-node.sh` (owner
+  decision, see DECISIONS 2026-07-22). Revisit for 1.0: the ISO removes
+  the "install Debian yourself" step entirely.
+
 - **Per-node reconciliation engine.** Grow `companion/src-tauri/src/node_ops.rs`
   (today: per-node serialization) into desired-state → observe → diff →
   apply → verify, with rollback and retry. Unblocked by: validated feature
