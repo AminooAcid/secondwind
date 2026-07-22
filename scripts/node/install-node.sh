@@ -12,6 +12,7 @@
 #   SECONDWIND_BRANCH       branch to install from (default: main)
 #   SECONDWIND_INSTALL_DIR  checkout location (default: /opt/secondwind)
 #   SECONDWIND_RELEASE_TAG  binaries release tag (default: node-rolling)
+#   SECONDWIND_BINARIES_TARBALL  use a local sw-node tarball (offline/dev)
 #   SECONDWIND_BUILD_FROM_SOURCE=1  compile binaries locally instead
 #   SECONDWIND_ASSUME_YES=1 skip the confirmation prompt
 
@@ -88,7 +89,12 @@ apt-get install -y -qq intel-media-va-driver-non-free >/dev/null 2>&1 \
 
 # ------------------------------------------------------------- binaries --
 say "4/7 installing SecondWind binaries"
-if [ "${SECONDWIND_BUILD_FROM_SOURCE:-0}" = "1" ]; then
+if [ -n "${SECONDWIND_BINARIES_TARBALL:-}" ]; then
+    [ -f "$SECONDWIND_BINARIES_TARBALL" ] \
+        || die "SECONDWIND_BINARIES_TARBALL not found: $SECONDWIND_BINARIES_TARBALL"
+    tar -xzf "$SECONDWIND_BINARIES_TARBALL" -C "$BIN_DIR" sw-agent sw-kiosk
+    chmod 0755 "$BIN_DIR/sw-agent" "$BIN_DIR/sw-kiosk"
+elif [ "${SECONDWIND_BUILD_FROM_SOURCE:-0}" = "1" ]; then
     command -v cargo >/dev/null 2>&1 || die "building from source needs Rust (rustup.rs)"
     (cd "$INSTALL_DIR" && cargo build --release -p sw-agent -p sw-kiosk)
     install -m 0755 "$INSTALL_DIR/target/release/sw-agent" "$BIN_DIR/sw-agent"
