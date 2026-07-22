@@ -13,3 +13,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --workspace
+      - name: Companion tests
+        run: cargo test --lib
+        working-directory: companion/src-tauri
+
+  node-binaries:
+    # The agent/kiosk ship on Linux; make sure they build there too.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace

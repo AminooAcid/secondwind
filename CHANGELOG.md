@@ -3,6 +3,29 @@
 All notable changes to SecondWind. Format loosely follows Keep a Changelog;
 versions are tagged only after their phase acceptance passes on hardware.
 
+## [Unreleased — v0.5 code-complete]
+
+### Added
+- Job offload: agent `GET`/`POST /v1/jobs` with Docker presets from the
+  node's own preset file (convert/compress/download), hard input
+  validation (no path traversal, http(s) URLs only), file jobs run with
+  the network disabled, and jobs operate directly on the mounted share.
+- Explorer context-menu registration ("Convert to MP4 on node",
+  "Compress on node") driving the companion's headless `--job` mode,
+  which requires inputs to live inside the SecondWind shared folder.
+- Ambient idle screen on the kiosk: clock + memory stats, minute-level
+  repaints.
+- Host installer script (`installer/innosetup/secondwind.iss`) bundling
+  the companion, glue scripts, Apollo, usbip-win2, and the xpra client,
+  with the third-party manifest in `THIRD-PARTY.md`.
+- CI now also runs companion tests and a Linux build of the node
+  binaries.
+
+### Changed
+- README rewritten: feature matrix, quickstart, credits, known limits.
+- `docs/UPSTREAM.md` now lists every upstream with license, invocation,
+  and pin rules.
+
 ## [Unreleased — v0.4 code-complete]
 
 ### Added

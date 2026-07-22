@@ -6,6 +6,14 @@ Format: newest first. Each entry has a date, the decision, the reasoning, and st
 
 ---
 
+## 2026-07-21 — v0.5 jobs + polish choices
+
+- **Job presets live on the node** (`/etc/secondwind/jobs.json`), mirroring the app-whitelist pattern: the host names a `preset_id` + input, never an image or command. Share-path inputs are traversal-checked on the node; file jobs run with `--network none`. *Status: accepted.*
+- **Context-menu jobs go through the companion's headless `--job` mode** and only accept files inside the SecondWind shared folder — that is what makes them zero-copy on the node. Registration is per-user (HKCU), no elevation. *Status: accepted.*
+- **outrun stays documentation-only** (plan §6.5): advanced CLI users can install it themselves; the v1 UI surfaces Docker presets only. *Status: accepted.*
+- **Ambient idle screen keeps to clock + memory line.** More stats mean more wakeups on an 8 GB-class node; the ≤400 MB idle target wins. *Status: accepted.*
+- **All phases through v0.5 are code-complete but untagged** until each phase's acceptance passes on the first physical pair; the consolidated hardware checklist lives in `docs/HARDWARE-VALIDATION.md`. *Status: accepted.*
+
 ## 2026-07-21 — v0.4 usb choices
 
 - **USB bind/unbind privilege goes through one sudoers-scoped wrapper script**, mirroring the polkit-per-unit pattern used for disk/share; bus ids are validated against a conservative charset in the agent *and* in the wrapper. *Status: accepted.*
