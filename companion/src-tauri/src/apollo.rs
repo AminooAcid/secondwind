@@ -400,13 +400,34 @@ pub fn ensure_service_running() -> Result<(), ApolloError> {
     Err(ApolloError::ServiceUnavailable)
 }
 
+/// Coarse service state parsed from `sc query`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ServiceState {
+    Running,
+    Stopped,
+    /// STOP_PENDING / START_PENDING / anything transitional.
+    Transitional,
+    Unknown,
+}
+
+fn service_state(name: &str) -> ServiceState {
+    let Ok(output) = Command::new("sc.exe").args(["query", name]).output() else {
+        return ServiceState::Unknown;
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    if text.contains("RUNNING") {
+        ServiceState::Running
+    } else if text.contains("STOPPED") {
+        ServiceState::Stopped
+    } else if text.contains("PENDING") {
+        ServiceState::Transitional
+    } else {
+        ServiceState::Unknown
+    }
+}
+
 fn service_query_running(name: &str) -> Result<bool, ApolloError> {
-    let output = Command::new("sc.exe")
-        .args(["query", name])
-        .output()
-        .map_err(|source| ApolloError::Process { source })?;
-    let text = String::from_utf8_lossy(&output.stdout).to_string();
-    Ok(text.contains("RUNNING"))
+    Ok(service_state(name) == ServiceState::Running)
 }
 
 /// Which service name is actually installed (first one that responds to a
@@ -435,22 +456,36 @@ fn installed_service_name() -> Option<String> {
 /// the Apollo control path).
 pub fn restart_service_and_wait(credentials: &ApolloCredentials) -> Result<(), ApolloError> {
     let name = installed_service_name().ok_or(ApolloError::ServiceUnavailable)?;
+
+    // Stop and wait for the *fully STOPPED* state — Apollo takes up to
+    // ~30 s and passes through STOP_PENDING, during which a start fails
+    // with 1056 "already running" (found on hardware).
     let _ = Command::new("sc.exe").args(["stop", &name]).status();
-    // Wait for it to actually stop before starting again.
-    for _ in 0..20 {
-        if !service_query_running(&name).unwrap_or(true) {
-            break;
+    let stop_deadline = std::time::Instant::now() + Duration::from_secs(45);
+    while service_state(&name) != ServiceState::Stopped {
+        if std::time::Instant::now() >= stop_deadline {
+            return Err(ApolloError::ServiceUnavailable);
         }
-        std::thread::sleep(Duration::from_millis(300));
+        std::thread::sleep(Duration::from_millis(500));
     }
-    let started = Command::new("sc.exe")
-        .args(["start", &name])
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false);
-    if !started && !service_query_running(&name).unwrap_or(false) {
-        return Err(ApolloError::ServiceUnavailable);
+
+    // Start and wait for RUNNING; retry the start while it is still
+    // transitioning.
+    let start_deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        match service_state(&name) {
+            ServiceState::Running => break,
+            ServiceState::Transitional => {}
+            _ => {
+                let _ = Command::new("sc.exe").args(["start", &name]).status();
+            }
+        }
+        if std::time::Instant::now() >= start_deadline {
+            return Err(ApolloError::ServiceUnavailable);
+        }
+        std::thread::sleep(Duration::from_millis(500));
     }
+
     wait_for_api_ready(&api_base(), credentials)
 }
 
